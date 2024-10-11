@@ -58,6 +58,7 @@ def Graph_n_write(gene_set, filter_column, filter_content):
 	plt.ylabel('mean CRISPR score', fontsize=18)
 	plt.tick_params(axis='both', labelsize=12)
 	plt.title('DepMap means filtered by: %s' %(filter_content), fontsize=20)
+	plt.hlines(0,0, len(gene_columns), color='black', alpha=0.5)
 
 	highlight_genes = gene_sets[gene_set]
 	if len(highlight_genes) != 0:
