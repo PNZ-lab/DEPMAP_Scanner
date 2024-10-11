@@ -49,13 +49,13 @@ def Graph_n_write(gene_set, filter_column, filter_content):
 
 	df_means = pd.DataFrame({
 		'Gene': mean_values.index,
-		'CRISPR_score': mean_values.values
+		'mean_CRISPR_score': mean_values.values
 	})
 
 	fig, ax = plt.subplots(figsize=(8,5), dpi=200)
 	plt.scatter(range(len(mean_values)), mean_values, color='black', alpha=1, s=10, zorder=2, label='gene dependency score')
 	plt.xlabel('Ranked depmap average', fontsize=18)
-	plt.ylabel('CRISPR score', fontsize=18)
+	plt.ylabel('mean CRISPR score', fontsize=18)
 	plt.tick_params(axis='both', labelsize=12)
 	plt.title('DepMap means filtered by: %s' %(filter_content), fontsize=20)
 
@@ -83,7 +83,7 @@ def Graph_n_write(gene_set, filter_column, filter_content):
 	df_means.to_csv(out_file, index=False)
 
 #%% ===========================================================================
-# 
+# 4 Analysis proper
 # =============================================================================
 
 # OncotreeLineage: e.g. 'Lymphoid' or 'Myeloid'
