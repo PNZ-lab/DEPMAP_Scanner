@@ -19,7 +19,7 @@ Using the following command in Section 4:<br>
 ## Purpose 2:
 Sections 5 through 7 contain functions that can be launched in section 8.
 - Section 5: Draw a series of boxplots showing each cancer's dependency on a specific gene
-- Section 6: Scan all genes for the lowest median scores for a specific cancer - then create a plot for the n genes with the lowest median scores
+- Section 6: Scan all genes for the lowest median scores for a specific cancer - then create a plot for the n genes with the lowest median scores (regardless of the scores of other cancers)
 - Section 7: Scan all genes and identify the ones for which a specific cancer has the lowest median score
   
 <img width="450" alt="image" src="https://github.com/user-attachments/assets/c043075e-1324-4379-8623-d5a1bb872728">
