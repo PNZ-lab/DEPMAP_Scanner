@@ -26,6 +26,9 @@ df_cl = pd.read_csv(in_cl)
 df_dm.rename(columns={df_dm.columns[0]: 'Depmap Id'}, inplace=True)
 df_dm.columns = df_dm.columns.str.replace(r'\s\(\d+\)', '', regex=True)
 
+target_cancer_type = 'T-Lymphoblastic Leukemia/Lymphoma'
+highlighted_cancer_types = [target_cancer_type] #Add more if more should be highlighted
+
 gene_sets = {
 	'None' : [],
 	'Test' : ['EZH2'],
@@ -90,4 +93,121 @@ def Graph_n_write(gene_set, filter_column, filter_content):
 # OncotreeLineage: e.g. 'Lymphoid' or 'Myeloid'
 # OncotreeCode: e.g TLL, BRCA
 Graph_n_write('splicing factors', 'OncotreeLineage', 'Lymphoid')
+
+
+#%% ===========================================================================
+# 5 Function: Draw boxplot of all cancer dependencies for one gene
+# =============================================================================
+
+import seaborn as sns
+
+def PlotOneGene(gene, highlighted_cancer_types):
+    # Step 1: Select only the columns for DepmapID and the gene of interest from df_dm
+    df_dm_gene = df_dm[['Depmap Id', gene]].rename(columns={'Depmap Id': 'ModelID'})
+    
+    # Step 2: Merge the gene dependency data with the clinical mapping data
+    df_merged = pd.merge(df_dm_gene, df_cl[['ModelID', 'OncotreeSubtype']], on='ModelID')
+    
+    # Step 3: Calculate medians by OncotreeSubtype and sort them
+    median_sorted = df_merged.groupby('OncotreeSubtype')[gene].median().sort_values().index
+    
+    # Define cancer types to recolor and their corresponding colors
+    color_palette = ['#d62728' if subtype in highlighted_cancer_types else '#1f77b4' for subtype in median_sorted]
+    
+    # Step 4: Create boxplots with custom colors for selected cancer types
+    plt.figure(figsize=(30, 8))
+    sns.boxplot(x='OncotreeSubtype', y=gene, data=df_merged, order=median_sorted, palette=color_palette)
+    plt.xticks(rotation=90)
+    plt.title(f'Dependency Factor of {gene} Across Cancer Types')
+    plt.xlabel('OncotreeSubtype')
+    plt.ylabel(f'{gene} Dependency Factor')
+    plt.tight_layout()
+    plt.show()
+
+
+#%% ===========================================================================
+# Function: Scan all genes and find the lowest (most dependent) scores for a cancer - Then plot it
+# =============================================================================
+
+import pandas as pd
+
+def FindTopNGenesWithLowestMedianForCancerType(cancer_type, n=5):
+    # Merge df_dm with df_cl to include OncotreeSubtype for each ModelID
+    df_dm_merged = pd.merge(
+        df_dm.rename(columns={'Depmap Id': 'ModelID'}), 
+        df_cl[['ModelID', 'OncotreeSubtype']], 
+        on='ModelID'
+    )
+    
+    # Filter to include only rows with the specified cancer type
+    cancer_type_df = df_dm_merged[df_dm_merged['OncotreeSubtype'] == cancer_type]
+    
+    # Calculate the median dependency score for each gene within the specific cancer type
+    gene_columns = cancer_type_df.columns.drop(['ModelID', 'OncotreeSubtype'])
+    medians = {gene: cancer_type_df[gene].median() for gene in gene_columns}
+    
+    # Sort the genes by median dependency scores and select the top n lowest
+    top_n_lowest_genes = sorted(medians, key=medians.get)[:n]
+    
+    return top_n_lowest_genes
+
+
+
+#%% ===========================================================================
+# Function: Scan all genes and find those were a specific cancer type has the lowest score - then plot them
+# =============================================================================
+
+def FindGenesWhereCancerTypeHasLowestMedian(target_cancer_type):
+    # Merge df_dm with df_cl to include OncotreeSubtype for each ModelID
+    df_dm_merged = pd.merge(
+        df_dm.rename(columns={'Depmap Id': 'ModelID'}), 
+        df_cl[['ModelID', 'OncotreeSubtype']], 
+        on='ModelID'
+    )
+    # Initialize a list to store genes where target_cancer_type has the lowest median
+    genes_with_lowest_in_target = []
+    
+    # Iterate over each gene column to check if the target cancer type has the lowest score
+    gene_columns = df_dm.columns.drop('Depmap Id')
+    for gene in gene_columns:
+        # Group by OncotreeSubtype and calculate the median for the current gene
+        medians_by_cancer = df_dm_merged.groupby('OncotreeSubtype')[gene].median()
+        
+        # Check if the target cancer type has the lowest median score
+        if medians_by_cancer[target_cancer_type] == medians_by_cancer.min():
+            genes_with_lowest_in_target.append(gene)
+    
+    return genes_with_lowest_in_target
+
+# Function to plot each gene in the list
+def PlotGenesWithLowestMedian(target_cancer_type, genes_to_plot):
+    for gene in genes_to_plot:
+        PlotOneGene(gene, [target_cancer_type])
+
+
+
+#%% ===========================================================================
+# Boxplot analysis proper
+# =============================================================================
+
+#%% Plot for a single gene
+gene = 'NOTCH1'  # Used for plotting a single gene
+PlotOneGene(gene, highlighted_cancer_types)
+
+#%% Find the top n lowest scores (regardless of the score of other cancers) for a specific cancer and plot them
+top_n_genes = FindTopNGenesWithLowestMedianForCancerType(target_cancer_type, n=5)
+for _gene in top_n_genes:
+    PlotOneGene(_gene, highlighted_cancer_types)
+
+#%% Find all genes where the specified cancer type has the lowest median score
+genes_with_lowest_in_target = FindGenesWhereCancerTypeHasLowestMedian(target_cancer_type)
+# Plot each of these genes
+PlotGenesWithLowestMedian(target_cancer_type, genes_with_lowest_in_target)
+print(f'Genes for which {target_cancer_type} has the lowest score:')
+for _gene in genes_with_lowest_in_target:
+    print(f'\t{_gene}')
+
+
+
+
 
