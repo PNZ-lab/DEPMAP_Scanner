@@ -26,8 +26,6 @@ df_cl = pd.read_csv(in_cl)
 df_dm.rename(columns={df_dm.columns[0]: 'Depmap Id'}, inplace=True)
 df_dm.columns = df_dm.columns.str.replace(r'\s\(\d+\)', '', regex=True)
 
-target_cancer_type = 'T-Lymphoblastic Leukemia/Lymphoma'
-highlighted_cancer_types = [target_cancer_type] #Add more if more should be highlighted
 
 gene_sets = {
 	'None' : [],
@@ -116,17 +114,16 @@ def PlotOneGene(gene, highlighted_cancer_types):
     
     # Step 4: Create boxplots with custom colors for selected cancer types
     plt.figure(figsize=(30, 8))
-    sns.boxplot(x='OncotreeSubtype', y=gene, data=df_merged, order=median_sorted, palette=color_palette)
+    sns.boxplot(x='OncotreeSubtype', y=gene, data=df_merged, order=median_sorted, hue='OncotreeSubtype', palette=color_palette)
     plt.xticks(rotation=90)
     plt.title(f'Dependency Factor of {gene} Across Cancer Types')
     plt.xlabel('OncotreeSubtype')
     plt.ylabel(f'{gene} Dependency Factor')
-    plt.tight_layout()
     plt.show()
 
 
 #%% ===========================================================================
-# Function: Scan all genes and find the lowest (most dependent) scores for a cancer - Then plot it
+# 6 Function: Scan all genes and find the lowest (most dependent) scores for a cancer - Then plot it
 # =============================================================================
 
 import pandas as pd
@@ -154,7 +151,7 @@ def FindTopNGenesWithLowestMedianForCancerType(cancer_type, n=5):
 
 
 #%% ===========================================================================
-# Function: Scan all genes and find those were a specific cancer type has the lowest score - then plot them
+# 7 Function: Scan all genes and find those were a specific cancer type has the lowest score - then plot them
 # =============================================================================
 
 def FindGenesWhereCancerTypeHasLowestMedian(target_cancer_type):
@@ -187,11 +184,14 @@ def PlotGenesWithLowestMedian(target_cancer_type, genes_to_plot):
 
 
 #%% ===========================================================================
-# Boxplot analysis proper
+# 8 Boxplot analysis proper
 # =============================================================================
 
+target_cancer_type = 'T-Lymphoblastic Leukemia/Lymphoma'
+highlighted_cancer_types = [target_cancer_type] #Add more if more should be highlighted
+
 #%% Plot for a single gene
-gene = 'NOTCH1'  # Used for plotting a single gene
+gene = 'KDM6B'  # Used for plotting a single gene
 PlotOneGene(gene, highlighted_cancer_types)
 
 #%% Find the top n lowest scores (regardless of the score of other cancers) for a specific cancer and plot them
