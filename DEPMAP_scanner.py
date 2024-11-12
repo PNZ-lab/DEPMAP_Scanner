@@ -114,7 +114,7 @@ def PlotOneGene(gene, highlighted_cancer_types):
     
     # Step 4: Create boxplots with custom colors for selected cancer types
     plt.figure(figsize=(30, 8))
-    sns.boxplot(x='OncotreeSubtype', y=gene, data=df_merged, order=median_sorted, hue='OncotreeSubtype', palette=color_palette)
+    sns.boxplot(x='OncotreeSubtype', y=gene, data=df_merged, order=median_sorted, palette=color_palette)
     plt.xticks(rotation=90)
     plt.title(f'Dependency Factor of {gene} Across Cancer Types')
     plt.xlabel('OncotreeSubtype')
@@ -126,8 +126,6 @@ def PlotOneGene(gene, highlighted_cancer_types):
 # 6 Function: Scan all genes and find the lowest (most dependent) scores for a cancer - Then plot it
 # =============================================================================
 
-import pandas as pd
-
 def FindTopNGenesWithLowestMedianForCancerType(cancer_type, n=5):
     # Merge df_dm with df_cl to include OncotreeSubtype for each ModelID
     df_dm_merged = pd.merge(
@@ -138,15 +136,25 @@ def FindTopNGenesWithLowestMedianForCancerType(cancer_type, n=5):
     
     # Filter to include only rows with the specified cancer type
     cancer_type_df = df_dm_merged[df_dm_merged['OncotreeSubtype'] == cancer_type]
-    
+
     # Calculate the median dependency score for each gene within the specific cancer type
     gene_columns = cancer_type_df.columns.drop(['ModelID', 'OncotreeSubtype'])
-    medians = {gene: cancer_type_df[gene].median() for gene in gene_columns}
+    medians = {gene: cancer_type_df[gene].median(skipna=True) for gene in gene_columns}
+
+    # Remove genes with NaN median scores
+    medians = {gene: median for gene, median in medians.items() if pd.notna(median)}
+
+    # Sort the medians dictionary by values (median scores) in ascending order
+    sorted_medians = sorted(medians.items(), key=lambda item: item[1])  # This gives you a list of (gene, median) tuples
     
-    # Sort the genes by median dependency scores and select the top n lowest
-    top_n_lowest_genes = sorted(medians, key=medians.get)[:n]
+    # Get the top n lowest genes
+    top_n_lowest_genes = [gene for gene, _ in sorted_medians[:n]]
     
     return top_n_lowest_genes
+
+
+
+
 
 
 
@@ -187,11 +195,12 @@ def PlotGenesWithLowestMedian(target_cancer_type, genes_to_plot):
 # 8 Boxplot analysis proper
 # =============================================================================
 
+target_cancer_type = 'Acute Myeloid Leukemia'
 target_cancer_type = 'T-Lymphoblastic Leukemia/Lymphoma'
 highlighted_cancer_types = [target_cancer_type] #Add more if more should be highlighted
 
 #%% Plot for a single gene
-gene = 'KDM6B'  # Used for plotting a single gene
+gene = 'TAL1'  # Used for plotting a single gene
 PlotOneGene(gene, highlighted_cancer_types)
 
 #%% Find the top n lowest scores (regardless of the score of other cancers) for a specific cancer and plot them
