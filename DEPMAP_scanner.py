@@ -280,79 +280,65 @@ for _gene in genes_with_lowest_in_target:
 # 9 Heatmaps for specific genes and specific (or all) cancers
 # =============================================================================
 
-# Takes as input a gene set, a series of OncotreeLineage (e.g. 'Lymphoid' or 'Myeloid'), and OncotreeCode( e.g TLL, BRCA)
-# E.g. for Lymphoid - BLL, Lymphoid - TLL, and Myeloid - AML: Create a heatmap of the subset
-
-
-gene_set = GetGeneSet('EZH2')
-
-dict_input = {
-    'AML' : ['OncotreeCode', 'AML'],
-    'B-ALL' : ['OncotreeCode', 'BLL'],
-    'T-ALL' : ['OncotreeCode', 'TLL']
-    }
-
-
-all_cancers = False # If True, will include all cancers with at least min_samples
-min_samples = 10
-fig_width = 5
-fig_height = 6
-
-if all_cancers:
-    qualifying_cancers = df_cl['OncotreeCode'].value_counts()[df_cl['OncotreeCode'].value_counts()>min_samples].index.tolist()
+def HeatmapSpecificGenes(gene_set, cancers='All', min_samples=10, fig_width=8, fig_height=6):
     dict_input = {}
-    for cancer in qualifying_cancers:
-        if cancer not in dict_input:
+    if cancers=='All':
+        qualifying_cancers = df_cl['OncotreeCode'].value_counts()[df_cl['OncotreeCode'].value_counts()>min_samples].index.tolist()
+        for cancer in qualifying_cancers:
+            # if cancer not in dict_input:
+            dict_input[cancer] = ['OncotreeCode', cancer]
+    else:
+        for cancer in cancers:
             dict_input[cancer] = ['OncotreeCode', cancer]
 
-import pandas as pd
-
-# Initialize a dataframe to store mean values for each cancer type
-mean_expression_data = pd.DataFrame()
-
-# Loop through each cancer type to filter, merge, and compute mean scores
-for cancer, filter_params in dict_input.items():
-    filter_column = filter_params[0]
-    filter_content = filter_params[1]
+    # Initialize a dataframe to store mean values for each cancer type
+    mean_expression_data = pd.DataFrame()
     
-    # Filter and merge data
-    df_cl_filtered = df_cl[df_cl[filter_column] == filter_content]
-    df_merged = pd.merge(df_cl_filtered, df_dm, left_on='ModelID', right_on='Depmap Id')
+    # Loop through each cancer type to filter, merge, and compute mean scores
+    for cancer, filter_params in dict_input.items():
+        filter_column = filter_params[0]
+        filter_content = filter_params[1]
+        
+        # Filter and merge data
+        df_cl_filtered = df_cl[df_cl[filter_column] == filter_content]
+        df_merged = pd.merge(df_cl_filtered, df_dm, left_on='ModelID', right_on='Depmap Id')
+        
+        # Select only numeric columns representing gene expression data
+        gene_columns = df_dm.select_dtypes(include='number').columns
+        
+        # Compute mean CRISPR score for each gene
+        mean_values = df_merged[gene_columns].mean()
+        
+        # Filter for genes in the specified gene set
+        mean_values = mean_values[mean_values.index.isin(gene_set)]
     
-    # Select only numeric columns representing gene expression data
-    gene_columns = df_dm.select_dtypes(include='number').columns
+        
+        # Append results to mean_expression_data with cancer type as index
+        mean_expression_data[cancer] = mean_values
     
-    # Compute mean CRISPR score for each gene
-    mean_values = df_merged[gene_columns].mean()
+    # No need to transpose since genes should go on the y-axis now
+    # mean_expression_data will already have genes as rows and cancers as columns
     
-    # Filter for genes in the specified gene set
-    mean_values = mean_values[mean_values.index.isin(gene_set)]
+    if cancers=='All':
+        desired_order = ['AML', 'BLL', 'TLL']
+        
+        #Combine desired columns with the remaining columns
+        remaining_columns = [col for col in mean_expression_data.columns if col not in desired_order]
+        reordered_columns = desired_order + remaining_columns
+        
+        #Reorder the DataFrame columns
+        mean_expression_data = mean_expression_data[reordered_columns]
+    
+    # Plot the heatmap with genes on the y-axis and cancers on the x-axis
+    plt.figure(figsize=(fig_width, fig_height), dpi=100)
+    sns.heatmap(mean_expression_data, cmap='coolwarm_r', annot=True)
+    plt.title('Mean Chronos score')
+    plt.xlabel('Cancer Types')
+    plt.ylabel('Genes')
+    plt.show()
 
-    
-    # Append results to mean_expression_data with cancer type as index
-    mean_expression_data[cancer] = mean_values
-
-# No need to transpose since genes should go on the y-axis now
-# mean_expression_data will already have genes as rows and cancers as columns
-
-if all_cancers:
-    desired_order = ['AML', 'BLL', 'TLL']
-    
-    #Combine desired columns with the remaining columns
-    remaining_columns = [col for col in mean_expression_data.columns if col not in desired_order]
-    reordered_columns = desired_order + remaining_columns
-    
-    #Reorder the DataFrame columns
-    mean_expression_data = mean_expression_data[reordered_columns]
-
-# Plot the heatmap with genes on the y-axis and cancers on the x-axis
-plt.figure(figsize=(fig_width, fig_height), dpi=100)
-sns.heatmap(mean_expression_data, cmap='coolwarm_r', annot=True)
-plt.title('Mean Chronos score')
-plt.xlabel('Cancer Types')
-plt.ylabel('Genes')
-plt.show()
-
+HeatmapSpecificGenes(GetGeneSet('m6a_re_wr_er'), cancers=['TLL', 'BLL', 'AML'], fig_width=6, fig_height=6)
+HeatmapSpecificGenes(GetGeneSet('PRC2'), cancers='All', min_samples=10, fig_width=40, fig_height=6)
 
 #%% ===========================================================================
 # 10 Heatmaps - finding the top absolute differential dependencies between one cancer and a set (or all) others
@@ -480,7 +466,10 @@ def compare_cancers(target_cancer, comparison_cancers=None, min_samples=10, top_
 # Usage
 compare_cancers(target_cancer='AML', comparison_cancers=None, min_samples=10, top_n=20, use_absolute_difference=False, fig_width=30, fig_height=6)
 compare_cancers(target_cancer='TLL', comparison_cancers=['BLL', 'AML'], min_samples=10, top_n=20, use_absolute_difference=True, fig_width=8, fig_height=6)
-#%% Same as above, but ranked by relative differences instead of absolute differences
+
+#%% ===========================================================================
+# Section 11: Same as above, but ranked by relative differences instead of absolute differences
+# =============================================================================
 from tqdm import tqdm
 import pandas as pd
 import seaborn as sns
@@ -589,7 +578,7 @@ for i, gene in enumerate(top_genes):
 # Plot styling
 title =f'Top {top_n} Genes: T-ALL vs AML & B-ALL (largest fold difference)'
 plt.title(title)
-plt.xlabel(f'Cancer Types and Difference (min cutoff:: {expression_threshold})')
+plt.xlabel(f'Cancer Types and Difference (min cutoff: {expression_threshold})')
 plt.ylabel('Genes')
 plt.show()
 
