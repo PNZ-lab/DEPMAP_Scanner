@@ -23,3 +23,51 @@ Sections 5 through 7 contain functions that can be launched in section 8.
 - Section 7: Scan all genes and identify the ones for which a specific cancer has the lowest median score
   
 <img width="450" alt="image" src="https://github.com/user-attachments/assets/c043075e-1324-4379-8623-d5a1bb872728">
+
+## Purpose 3:
+Section 9 draws heatmaps of dependencies for several genes and several cancers
+
+### Example #1:
+
+    HeatmapSpecificGenes(GetGeneSet('m6a_re_wr_er'), cancers=['TLL', 'BLL', 'AML'], fig_width=6, fig_height=6)
+
+Will produce:
+
+<img width="450" alt="image" src="https://github.com/user-attachments/assets/25fb5907-d414-49e9-b965-2ae38a3ac0be">
+
+### Example #2:
+
+    HeatmapSpecificGenes(GetGeneSet('PRC2'), cancers='All', min_samples=10, fig_width=40, fig_height=6)
+
+Will produce:
+
+<img width="450" alt="image" src="https://github.com/user-attachments/assets/9036c1b2-e7e9-4a96-bd10-ddfb7eca086f">
+
+Section 10 can find relative differences (absolute and relative) between a cancers and others in a set.
+
+### Example #3:
+
+    compare_cancers(target_cancer='AML', comparison_cancers=None, min_samples=10, top_n=20, use_absolute_difference=False, fig_width=30, fig_height=6)
+
+Will produce:
+
+<img width="450" alt="image" src="https://github.com/user-attachments/assets/da2284e2-185a-49a2-b9bd-4213a3e017cc">
+
+### Example #4: 
+
+    compare_cancers(target_cancer='TLL', comparison_cancers=['BLL', 'AML'], min_samples=10, top_n=20, use_absolute_difference=True, fig_width=8, fig_height=6)
+
+Will produce:
+
+<img width="450" alt="image" src="https://github.com/user-attachments/assets/890cef1d-3466-4cf1-ab47-b53e96dcc349">
+
+Section 11 produces a graph on relative differences (BETA)
+
+### Example #5:
+<img width="450" alt="image" src="https://github.com/user-attachments/assets/9d5f9aa1-929e-493f-9cef-efa6578bfd47">
+
+
+
+
+
+
