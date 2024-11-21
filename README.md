@@ -1,5 +1,5 @@
 # DEPMAP_Scanner.py:
-This script has two main purposes:
+This script has three main purposes:
 1. Scan a subset of cell lines and output it's dependencies for all genes
 2. Scan all cancer types and identify genes with low (most dependent) CRISPR scores.
 3. Generate heatmaps to highlight differential dependencies of cancers
