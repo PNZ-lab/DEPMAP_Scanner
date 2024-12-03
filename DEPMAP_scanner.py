@@ -49,10 +49,10 @@ gene_sets = {
     'm6a_erasers' : ['FTO', 'ALKBH5'],
     'm6a_readers' : ['YTHS', 'EIF3', 'HNRNPC', 'HNRNPA2B1', 'IGF2BP1', 'IGF2BP2', 'IGF2BP3'],
     'm6a_re_wr_er' : ['METTL3', 'METTL14', 'METTL16', 'KIAA1429','RBM15', 'WTAP', 'FTO', 'ALKBH5', 'YTHS', 'EIF3', 'HNRNPC', 'HNRNPA2B1', 'YTHDF1', 'YTHDF2', 'YTHDC1', 'YTHDC2', 'TYSND1', 'SND1', 'PRRC2A', 'LRPPRC', 'FMR1','FMR1NB', 'IGF2BP1', 'IGF2BP2', 'IGF2BP3'],
-    'PRC2' : ['EZH1', 'EZH2', 'EED', 'SUZ12', 'RBBP4', 'RBBP7', 'JARID2', 'PCGF1', 'PCGF2', 'RING1', 'BMI1']
+    'PRC2' : ['EZH1', 'EZH2', 'EED', 'SUZ12', 'RBBP4', 'RBBP7', 'JARID2', 'PCGF1', 'PCGF2', 'RING1', 'BMI1'],
+    'Laura' : ['NAMPT', 'NAPRT', 'IDO', 'DHFR', 'NNMAT1', 'NNMAT2', 'NNMAT3', 'QPRT', 'MAT2A'],
+    'Kevin' :['PRPF8', 'SRRM1', 'SRRM2', 'ACIN1', 'RNPS1', 'CLK1', 'CLK2', 'CLK3', 'CLK4']
 	}
-
-
 
 # This function helps define gene sets to be highlighted.
 # A set of genes is selected based on the string used as input.
@@ -139,7 +139,7 @@ def Graph_n_write(gene_set, filter_column, filter_content):
     # a name for a gene set (genes in gene set will be determined by GetGeneSet())
     # a column in the dataframe for the description of the cell lines (e.g. OncotreeLineage or OncotreeCode)
     # a value in the given column to consider a hit for inclusion purposes (e.g. BRCA or TLL)
-Graph_n_write('HALLMARK_MYC_TARGETS_V1', 'OncotreeCode', 'TLL')
+Graph_n_write('Kevin', 'OncotreeCode', 'TLL')
 
 
 #%% ===========================================================================
@@ -338,7 +338,9 @@ def HeatmapSpecificGenes(gene_set, cancers='All', min_samples=10, fig_width=8, f
     plt.show()
 
 HeatmapSpecificGenes(GetGeneSet('m6a_re_wr_er'), cancers=['TLL', 'BLL', 'AML'], fig_width=6, fig_height=6)
-HeatmapSpecificGenes(GetGeneSet('PRC2'), cancers='All', min_samples=10, fig_width=40, fig_height=6)
+HeatmapSpecificGenes(GetGeneSet('Kevin'), cancers=['TLL', 'BLL', 'AML'], fig_width=4, fig_height=5)
+HeatmapSpecificGenes(GetGeneSet('Kevin'), cancers='All', fig_width=40, fig_height=8, min_samples=10)
+# HeatmapSpecificGenes(GetGeneSet('PRC2'), cancers='All', min_samples=10, fig_width=40, fig_height=6)
 
 #%% ===========================================================================
 # 10 Heatmaps - finding the top absolute differential dependencies between one cancer and a set (or all) others
