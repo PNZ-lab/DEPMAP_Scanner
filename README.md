@@ -1,4 +1,6 @@
 # DEPMAP_Scanner.py:
+Note: This script requires KTC_functions.py (also on github) to be in the same directory as this file.
+
 This script has three main purposes:
 1. Scan a subset of cell lines and output it's dependencies for all genes
 2. Scan all cancer types and identify genes with lowest (most dependent) CRISPR scores.
