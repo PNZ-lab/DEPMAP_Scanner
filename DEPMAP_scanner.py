@@ -300,6 +300,7 @@ def HeatmapSpecificGenes(gene_set, cancers='All', min_samples=10, fig_width=8, f
     plt.show()
 
 HeatmapSpecificGenes(KTC_GetGeneSet('WTAP'), cancers=['AML', 'BLL', 'TLL'], fig_width=4, fig_height=6, annotate_values=True)
+HeatmapSpecificGenes(KTC_GetGeneSet(['DHFR', 'NAMPT', 'IDO1', 'NAPRT']), cancers=['AML', 'BLL', 'TLL'], fig_width=4, fig_height=6, annotate_values=True)
 # HeatmapSpecificGenes(KTC_GetGeneSet('Kevin'), cancers=['TLL', 'BLL', 'AML'], fig_width=4, fig_height=5)
 # HeatmapSpecificGenes(KTC_GetGeneSet('Kevin'), cancers='All', fig_width=40, fig_height=8, min_samples=10)
 # HeatmapSpecificGenes(GetGeneSet('PRC2'), cancers='All', min_samples=10, fig_width=40, fig_height=6)
@@ -545,4 +546,5 @@ plt.title(title)
 plt.xlabel(f'Cancer Types and Difference (min cutoff: {expression_threshold})')
 plt.ylabel('Genes')
 plt.show()
+
 
