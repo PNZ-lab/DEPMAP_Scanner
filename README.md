@@ -32,7 +32,7 @@ Section 9 draws heatmaps of dependencies for several genes and several cancers
 
 ### Example #1:
 
-    HeatmapSpecificGenes(GetGeneSet('m6a_re_wr_er'), cancers=['TLL', 'BLL', 'AML'], fig_width=6, fig_height=6)
+    HeatmapSpecificGenes(KTC_GetGeneSet('m6a_re_wr_er'), cancers=['TLL', 'BLL', 'AML'], fig_width=6, fig_height=6)
 
 Will produce:
 
