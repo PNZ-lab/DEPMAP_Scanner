@@ -40,7 +40,7 @@ Will produce:
 
 ### Example #2:
 
-    HeatmapSpecificGenes(GetGeneSet('PRC2'), cancers='All', min_samples=10, fig_width=40, fig_height=6)
+    HeatmapSpecificGenes(KTC_GetGeneSet('PRC2'), cancers='All', min_samples=10, fig_width=40, fig_height=6)
 
 Will produce:
 
