@@ -28,8 +28,10 @@ import numpy as np
 from KTC_functions import KTC_GetGeneSet
 
 # in_dm = '/Users/kasperthorhaugechristensen/Downloads/dependency_all.csv' # older data set
-in_dm = '/Volumes/cmgg_pnlab/Kasper/Data/Interesting_Lists/CRISPRGeneEffect.csv'
-in_cl = '/Volumes/cmgg_pnlab/Kasper/Data/Interesting_Lists/Depmap_CellLine_annotation.csv'
+# in_dm = '/Volumes/cmgg_pnlab/Kasper/Data/Interesting_Lists/CRISPRGeneEffect.csv'
+in_dm = '/Volumes/cmgg_pnlab/Kasper/Data/Interesting_Lists/CRISPRGeneEffect_Q42024.csv'
+# in_cl = '/Volumes/cmgg_pnlab/Kasper/Data/Interesting_Lists/Depmap_CellLine_annotation.csv'
+in_cl = '/Volumes/cmgg_pnlab/Kasper/Data/Interesting_Lists/DepMap_Cellline_annotation_Q42024.csv'
 out   = '/Users/kasperthorhaugechristensen/Desktop/Dumpbox'
 
 df_dm = pd.read_csv(in_dm, low_memory=False)
@@ -218,11 +220,11 @@ def PlotGenesWithLowestMedian(target_cancer_type, genes_to_plot):
 # =============================================================================
 
 target_cancer_type = 'Acute Myeloid Leukemia'
-target_cancer_type = 'T-Lymphoblastic Leukemia/Lymphoma'
+target_cancer_type = 'T-Lymphoblastic Leukemia/Lymphoma' # Includes Lymphoma
 highlighted_cancer_types = [target_cancer_type] #Add more if more should be highlighted
 
 #%% Plot for a single gene
-gene = 'LEF1'  # Used for plotting a single gene
+gene = 'EZH2'  # Used for plotting a single gene
 PlotOneGene(gene, highlighted_cancer_types)
 
 #%% Find the top n lowest scores (regardless of the score of other cancers) for a specific cancer and plot them
@@ -277,7 +279,7 @@ def HeatmapSpecificGenes(gene_set, cancers='All', min_samples=10, fig_width=8, f
         
         # Append results to mean_expression_data with cancer type as index
         mean_expression_data[cancer] = mean_values
-    
+
     # No need to transpose since genes should go on the y-axis now
     # mean_expression_data will already have genes as rows and cancers as columns
     
@@ -293,14 +295,20 @@ def HeatmapSpecificGenes(gene_set, cancers='All', min_samples=10, fig_width=8, f
     
     # Plot the heatmap with genes on the y-axis and cancers on the x-axis
     plt.figure(figsize=(fig_width, fig_height), dpi=200)
-    sns.heatmap(mean_expression_data, cmap='coolwarm_r', annot=annotate_values)
+    # sns.heatmap(mean_expression_data, cmap='coolwarm_r', annot=annotate_values)
+    sns.heatmap(mean_expression_data, cmap='coolwarm_r', annot=annotate_values, fmt=".3f")
+
     plt.title('Cancer dependency (DepMap)')
     # plt.xlabel('Cancer Types')
     # plt.ylabel('Genes')
+    out_path = '/Users/kasperthorhaugechristensen/Library/CloudStorage/OneDrive-UGent/PNG lab/Kasper/m6a_genes_v_clinical/m6a_heatmap_3.svg'
+    plt.savefig(out_path)
     plt.show()
 
-HeatmapSpecificGenes(KTC_GetGeneSet('WTAP'), cancers=['AML', 'BLL', 'TLL'], fig_width=4, fig_height=6, annotate_values=True)
-HeatmapSpecificGenes(KTC_GetGeneSet(['DHFR', 'NAMPT', 'IDO1', 'NAPRT']), cancers=['AML', 'BLL', 'TLL'], fig_width=4, fig_height=6, annotate_values=True)
+# HeatmapSpecificGenes(KTC_GetGeneSet('WTAP'), cancers=['AML', 'BLL', 'TLL'], fig_width=4, fig_height=6, annotate_values=True)
+# HeatmapSpecificGenes(KTC_GetGeneSet(['DHFR', 'NAMPT', 'IDO1', 'NAPRT']), cancers=['AML', 'BLL', 'TLL'], fig_width=4, fig_height=6, annotate_values=True)
+# HeatmapSpecificGenes(KTC_GetGeneSet('m6a_re_wr_er'), cancers=['AML', 'BLL', 'TLL', 'TALL'], fig_width=3.5, fig_height=6, annotate_values=True)
+HeatmapSpecificGenes(KTC_GetGeneSet('m6a_re_wr_er'), cancers=['AML', 'BLL', 'TLL'], fig_width=4, fig_height=6, annotate_values=True, min_samples=9)
 # HeatmapSpecificGenes(KTC_GetGeneSet('Kevin'), cancers=['TLL', 'BLL', 'AML'], fig_width=4, fig_height=5)
 # HeatmapSpecificGenes(KTC_GetGeneSet('Kevin'), cancers='All', fig_width=40, fig_height=8, min_samples=10)
 # HeatmapSpecificGenes(GetGeneSet('PRC2'), cancers='All', min_samples=10, fig_width=40, fig_height=6)
@@ -429,7 +437,7 @@ def compare_cancers(target_cancer, comparison_cancers=None, min_samples=10, top_
     plt.show()
 
 # Usage
-compare_cancers(target_cancer='AML', comparison_cancers=None, min_samples=10, top_n=20, use_absolute_difference=False, fig_width=30, fig_height=6)
+# compare_cancers(target_cancer='AML', comparison_cancers=None, min_samples=10, top_n=20, use_absolute_difference=False, fig_width=30, fig_height=6)
 compare_cancers(target_cancer='TLL', comparison_cancers=['BLL', 'AML'], min_samples=10, top_n=20, use_absolute_difference=True, fig_width=8, fig_height=6)
 
 #%% ===========================================================================
