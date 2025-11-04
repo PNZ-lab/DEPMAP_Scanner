@@ -27,12 +27,15 @@ from scipy.stats import mannwhitneyu
 import numpy as np
 from KTC_functions import KTC_GetGeneSet
 
-# in_dm = '/Users/kasperthorhaugechristensen/Downloads/dependency_all.csv' # older data set
-# in_dm = '/Volumes/cmgg_pnlab/Kasper/Data/Interesting_Lists/CRISPRGeneEffect.csv'
-in_dm = '/Volumes/cmgg_pnlab/Kasper/Data/Interesting_Lists/CRISPRGeneEffect_Q42024.csv'
-# in_cl = '/Volumes/cmgg_pnlab/Kasper/Data/Interesting_Lists/Depmap_CellLine_annotation.csv'
-in_cl = '/Volumes/cmgg_pnlab/Kasper/Data/Interesting_Lists/DepMap_Cellline_annotation_Q42024.csv'
-out   = '/Users/kasperthorhaugechristensen/Desktop/Dumpbox'
+in_dir = '/Volumes/cmgg_pnlab/Kasper/Data/Interesting_Lists'
+
+in_dm = os.path.join(in_dir, 'CRISPRGeneEffect_Q42024.csv')
+# in_dm = os.path.join(in_dir, 'CRISPRGeneEffect_2025Q2.csv')
+
+in_cl = os.path.join(in_dir, 'DepMap_Cellline_annotation_Q42024.csv')
+# in_cl = os.path.join(in_dir, 'DepMap_CellLine_annotation_2025Q2.csv')
+
+out   = '/Users/kachrist/Desktop/out_dir'
 
 df_dm = pd.read_csv(in_dm, low_memory=False)
 df_cl = pd.read_csv(in_cl)
@@ -95,7 +98,7 @@ def Graph_n_write(gene_set, filter_column, filter_content):
     out_file = os.path.join(out, 'DEPMAP_%s_filtered.csv' %(filter_content))
     df_means.to_csv(out_file, index=False)
 
-#%% ===========================================================================
+# ===========================================================================
 # 4 Main functionality
 # =============================================================================
 
@@ -106,36 +109,73 @@ def Graph_n_write(gene_set, filter_column, filter_content):
 Graph_n_write('Kevin', 'OncotreeCode', 'TLL')
 
 
-#%% ===========================================================================
+# ===========================================================================
 # 5 Function: Draw boxplot of all cancer dependencies for one gene
 # =============================================================================
 
 import seaborn as sns
 
-def PlotOneGene(gene, highlighted_cancer_types):
+def PlotOneGene(
+    gene,
+    highlighted_cancer_types,
+    df_cl_col='OncotreeSubtype', # E.g. OncotreeSubtype, OncotreeLineage, OncotreePrimaryDisease
+    fig_width=30,
+    fig_height=8,
+    min_samples=5,
+    horizontal=False
+):
     # Step 1: Select only the columns for DepmapID and the gene of interest from df_dm
     df_dm_gene = df_dm[['Depmap Id', gene]].rename(columns={'Depmap Id': 'ModelID'})
     
     # Step 2: Merge the gene dependency data with the clinical mapping data
-    df_merged = pd.merge(df_dm_gene, df_cl[['ModelID', 'OncotreeSubtype']], on='ModelID')
+    df_merged = pd.merge(df_dm_gene, df_cl[['ModelID', df_cl_col]], on='ModelID')
     
-    # Step 3: Calculate medians by OncotreeSubtype and sort them
-    median_sorted = df_merged.groupby('OncotreeSubtype')[gene].median().sort_values().index
+    # Step 3: Filter out subtypes with fewer than min_samples
+    subtype_counts = df_merged[df_cl_col].value_counts()
+    valid_subtypes = subtype_counts[subtype_counts >= min_samples].index
+    df_merged = df_merged[df_merged[df_cl_col].isin(valid_subtypes)]
+    
+    print(df_merged)
+    
+    # Step 4: Calculate medians by OncotreeSubtype and sort them
+    median_sorted = df_merged.groupby(df_cl_col)[gene].median().sort_values().index
     
     # Define cancer types to recolor and their corresponding colors
-    color_palette = ['#d62728' if subtype in highlighted_cancer_types else '#1f77b4' for subtype in median_sorted]
+    color_palette = [
+        '#d62728' if subtype in highlighted_cancer_types else '#1f77b4'
+        for subtype in median_sorted
+    ]
     
-    # Step 4: Create boxplots with custom colors for selected cancer types
-    plt.figure(figsize=(30, 8))
-    sns.boxplot(x='OncotreeSubtype', y=gene, data=df_merged, order=median_sorted, palette=color_palette)
-    plt.xticks(rotation=90)
-    plt.title(f'Dependency Factor of {gene} Across Cancer Types')
-    plt.xlabel('OncotreeSubtype')
-    plt.ylabel(f'{gene} Dependency Factor')
+    # Step 5: Create boxplots with custom colors for selected cancer types
+    plt.figure(figsize=(fig_width, fig_height), dpi=200)
+
+    if horizontal:
+        sns.boxplot(
+            y=df_cl_col,
+            x=gene,
+            data=df_merged,
+            order=median_sorted,
+            palette=color_palette
+        )
+        plt.ylabel(df_cl_col)
+        plt.xlabel(f'{gene} Dependency Factor')
+    else:
+        sns.boxplot(
+            x=df_cl_col,
+            y=gene,
+            data=df_merged,
+            order=median_sorted,
+            palette=color_palette
+        )
+        plt.xticks(rotation=90)
+        plt.xlabel(df_cl_col)
+        plt.ylabel(f'{gene} Dependency Factor')
+    
+    plt.title(f'Dependency Factor of {gene} Across Cancer Types (samples >= {min_samples})')
+    plt.tight_layout()
     plt.show()
 
-
-#%% ===========================================================================
+# ===========================================================================
 # 6 Function: Scan all genes and find the lowest (most dependent) scores for a cancer - Then plot it
 # =============================================================================
 
@@ -170,7 +210,7 @@ def FindTopNGenesWithLowestMedianForCancerType(cancer_type, n=5):
 
 
 
-#%% ===========================================================================
+# ===========================================================================
 # 7 Function: Scan all genes and find those were a specific cancer type has the lowest score - then plot them
 # =============================================================================
 
@@ -213,38 +253,7 @@ def PlotGenesWithLowestMedian(target_cancer_type, genes_to_plot):
     for gene in genes_to_plot:
         PlotOneGene(gene, [target_cancer_type])
 
-
-
-#%% ===========================================================================
-# 8 Boxplot analysis proper
-# =============================================================================
-
-target_cancer_type = 'Acute Myeloid Leukemia'
-target_cancer_type = 'T-Lymphoblastic Leukemia/Lymphoma' # Includes Lymphoma
-highlighted_cancer_types = [target_cancer_type] #Add more if more should be highlighted
-
-#%% Plot for a single gene
-gene = 'EZH2'  # Used for plotting a single gene
-PlotOneGene(gene, highlighted_cancer_types)
-
-#%% Find the top n lowest scores (regardless of the score of other cancers) for a specific cancer and plot them
-top_n_genes = FindTopNGenesWithLowestMedianForCancerType(target_cancer_type, n=5)
-for _gene in top_n_genes:
-    PlotOneGene(_gene, highlighted_cancer_types)
-
-#%% Find all genes where the specified cancer type has the lowest median score
-genes_with_lowest_in_target = FindGenesWhereCancerTypeHasLowestMedian(target_cancer_type)
-# Plot each of these genes
-PlotGenesWithLowestMedian(target_cancer_type, genes_with_lowest_in_target)
-print(f'Genes for which {target_cancer_type} has the lowest score:')
-for _gene in genes_with_lowest_in_target:
-    print(f'\t{_gene}')
-
-#%% ===========================================================================
-# 9 Heatmaps for specific genes and specific (or all) cancers
-# =============================================================================
-
-def HeatmapSpecificGenes(gene_set, cancers='All', min_samples=10, fig_width=8, fig_height=6, annotate_values=True):
+def HeatmapSpecificGenes(gene_set, cancers='All', min_samples=10, fig_width=8, fig_height=6, annotate_values=True, title='Cancer dependency (DepMap)'):
     dict_input = {}
     if cancers=='All':
         qualifying_cancers = df_cl['OncotreeCode'].value_counts()[df_cl['OncotreeCode'].value_counts()>min_samples].index.tolist()
@@ -296,22 +305,72 @@ def HeatmapSpecificGenes(gene_set, cancers='All', min_samples=10, fig_width=8, f
     # Plot the heatmap with genes on the y-axis and cancers on the x-axis
     plt.figure(figsize=(fig_width, fig_height), dpi=200)
     # sns.heatmap(mean_expression_data, cmap='coolwarm_r', annot=annotate_values)
-    sns.heatmap(mean_expression_data, cmap='coolwarm_r', annot=annotate_values, fmt=".3f")
+    sns.heatmap(mean_expression_data, cmap='coolwarm_r', annot=annotate_values, fmt=".2f")
 
-    plt.title('Cancer dependency (DepMap)')
+    plt.title(title)
     # plt.xlabel('Cancer Types')
     # plt.ylabel('Genes')
-    out_path = '/Users/kasperthorhaugechristensen/Library/CloudStorage/OneDrive-UGent/PNG lab/Kasper/m6a_genes_v_clinical/m6a_heatmap_3.svg'
+    out_path = os.path.join(out, 'DepMap_Heatmap_speficic_genes.svg')
     plt.savefig(out_path)
     plt.show()
 
+#%% ===========================================================================
+# 8 Boxplot analysis proper
+# =============================================================================
+
+target_cancer_type = 'Acute Myeloid Leukemia'
+target_cancer_type = 'T-Lymphoblastic Leukemia/Lymphoma' # Includes Lymphoma
+highlighted_cancer_types = [target_cancer_type] #Add more if more should be highlighted
+
+#%% Plot for a single gene
+
+# PlotOneGene(gene='NAMPT',
+#             highlighted_cancer_types='Lymphoid',
+#             df_cl_col='OncotreeLineage',
+#             fig_width=10,
+#             fig_height=8,
+#             min_samples=40,
+#             horizontal=True
+#             )
+
+PlotOneGene(gene='HNRNPC',
+            highlighted_cancer_types='T-Cell Acute Lymphoblastic Leukemia',
+            df_cl_col='OncotreeSubtype',
+            fig_width=10,
+            fig_height=20,
+            min_samples=5,
+            horizontal=True
+            )
+
+
+
+#%% Find the top n lowest scores (regardless of the score of other cancers) for a specific cancer and plot them
+top_n_genes = FindTopNGenesWithLowestMedianForCancerType(target_cancer_type, n=5)
+for _gene in top_n_genes:
+    PlotOneGene(_gene, highlighted_cancer_types, df_cl_col='OncotreePrimaryDisease')
+
+#%% Find all genes where the specified cancer type has the lowest median score
+genes_with_lowest_in_target = FindGenesWhereCancerTypeHasLowestMedian(target_cancer_type)
+# Plot each of these genes
+PlotGenesWithLowestMedian(target_cancer_type, genes_with_lowest_in_target)
+print(f'Genes for which {target_cancer_type} has the lowest score:')
+for _gene in genes_with_lowest_in_target:
+    print(f'\t{_gene}')
+
+#%% ===========================================================================
+# 9 Heatmaps for specific genes and specific (or all) cancers
+# =============================================================================
+
+
+
 # HeatmapSpecificGenes(KTC_GetGeneSet('WTAP'), cancers=['AML', 'BLL', 'TLL'], fig_width=4, fig_height=6, annotate_values=True)
 # HeatmapSpecificGenes(KTC_GetGeneSet(['DHFR', 'NAMPT', 'IDO1', 'NAPRT']), cancers=['AML', 'BLL', 'TLL'], fig_width=4, fig_height=6, annotate_values=True)
-# HeatmapSpecificGenes(KTC_GetGeneSet('m6a_re_wr_er'), cancers=['AML', 'BLL', 'TLL', 'TALL'], fig_width=3.5, fig_height=6, annotate_values=True)
-HeatmapSpecificGenes(KTC_GetGeneSet('m6a_re_wr_er'), cancers=['AML', 'BLL', 'TLL'], fig_width=4, fig_height=6, annotate_values=True, min_samples=9)
+HeatmapSpecificGenes(KTC_GetGeneSet('m6a_re_wr_er'), cancers=['BRCA', 'NBL', 'TLL', 'AML'], fig_width=4, fig_height=6, annotate_values=True)
+# HeatmapSpecificGenes(up_genes, fig_width=4, fig_height=10, annotate_values=True, min_samples=9)
+# HeatmapSpecificGenes(['CLK1', 'CLK2', 'CLK3', 'CLK4'], cancers='All', fig_width=40, fig_height=6, annotate_values=True, min_samples=9)
 # HeatmapSpecificGenes(KTC_GetGeneSet('Kevin'), cancers=['TLL', 'BLL', 'AML'], fig_width=4, fig_height=5)
 # HeatmapSpecificGenes(KTC_GetGeneSet('Kevin'), cancers='All', fig_width=40, fig_height=8, min_samples=10)
-# HeatmapSpecificGenes(GetGeneSet('PRC2'), cancers='All', min_samples=10, fig_width=40, fig_height=6)
+# HeatmapSpecificGenes(KTC_Get, cancers='All', min_samples=10, fig_width=40, fig_height=15, title='top genes based on KM p vals')
 
 #%% ===========================================================================
 # 10 Heatmaps - finding the top absolute differential dependencies between one cancer and a set (or all) others
