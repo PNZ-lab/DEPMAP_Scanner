@@ -26,15 +26,18 @@ import os
 from scipy.stats import mannwhitneyu
 import numpy as np
 from KTC_functions import KTC_GetGeneSet
+from tqdm import tqdm
+from adjustText import adjust_text
+
+
 
 in_dir = '/Volumes/kachrist/shares/cmgg_pnlab/Kasper/Data/Interesting_Lists'
 
+# in_dm = os.path.join(in_dir, 'CRISPRGeneEffect_Q42024.csv')
+in_dm = os.path.join(in_dir, 'CRISPRGeneEffect_2025Q3.csv')
 
-in_dm = os.path.join(in_dir, 'CRISPRGeneEffect_Q42024.csv')
-# in_dm = os.path.join(in_dir, 'CRISPRGeneEffect_2025Q2.csv')
-
-in_cl = os.path.join(in_dir, 'DepMap_Cellline_annotation_Q42024.csv')
-# in_cl = os.path.join(in_dir, 'DepMap_CellLine_annotation_2025Q2.csv')
+# in_cl = os.path.join(in_dir, 'DepMap_Cellline_annotation_Q42024.csv')
+in_cl = os.path.join(in_dir, 'DepMap_CellLine_annotation_2025Q3.csv')
 
 out   = '/Users/kachrist/Desktop/out_dir'
 
@@ -49,78 +52,14 @@ df_cl['OncotreeSubtype'] = df_cl['OncotreeSubtype'].replace({
     'UPS/MFHS/Spindle Cell Sarcoma'
 })
 
-
-#%% ===========================================================================
-# 3 Function: Plot all dependencies for one cancer
+#%% =============================================================================
+# Functions    
 # =============================================================================
-
-def Graph_n_write(gene_set, filter_column, filter_content):
-
-    df_cl_filtered = df_cl[df_cl[filter_column] == filter_content]
-
-    df_merged = pd.merge(df_cl_filtered, df_dm, left_on='ModelID', right_on='Depmap Id')
-
-    gene_columns = df_dm.select_dtypes(include='number').columns
-    mean_values =  df_merged[gene_columns].mean().sort_values()
-
-    df_means = pd.DataFrame({
-        'Gene': mean_values.index,
-        'mean_CRISPR_score': mean_values.values
-    })
-
-    fig, ax = plt.subplots(figsize=(8,5), dpi=200)
-    plt.scatter(range(len(mean_values)), mean_values, color='black', alpha=1, s=10, zorder=2, label='gene dependency score')
-    plt.xlabel('Ranked depmap average', fontsize=18)
-    plt.ylabel('mean CRISPR score', fontsize=18)
-    plt.tick_params(axis='both', labelsize=12)
-    plt.title('DepMap means filtered by: %s' %(filter_content), fontsize=20)
-    plt.hlines(0,0, len(gene_columns), color='black', alpha=0.5)
-
-    highlight_genes = KTC_GetGeneSet(gene_set)
-    if len(highlight_genes) != 0:
-        genes  = mean_values.index
-        ranks  = range(len(genes))
-        scores = mean_values.values
-        highlight_indices = [i for i, gene in enumerate(genes) if gene in highlight_genes]
-        highlight_ranks = np.array(ranks)[highlight_indices]
-        highlight_scores = np.array(scores)[highlight_indices]
-        background_scores = [r for r in scores if r not in highlight_scores]
-        highlight_scores = [score for score in highlight_scores if not np.isnan(score)]
-        background_scores = [score for score in background_scores if not np.isnan(score)]
-
-        stat, p_value = mannwhitneyu(highlight_scores, background_scores, alternative='two-sided')
-        for rank, score in zip(highlight_ranks, highlight_scores):
-            plt.vlines(x=rank, ymin=min(scores), ymax=max(scores), color='red', linewidth=0.5, zorder=1, label= '%s (%.0f, p=%f)' %(gene_set, stat, p_value))
-
-
-    handles, labels = plt.gca().get_legend_handles_labels()
-    by_label = dict(zip(labels, handles))
-    plt.legend(by_label.values(), by_label.keys(), fontsize=12)
-
-    out_file = os.path.join(out, 'DEPMAP_%s_filtered.csv' %(filter_content))
-    df_means.to_csv(out_file, index=False)
-
-# ===========================================================================
-# 4 Main functionality
-# =============================================================================
-
-# Graph_n_write takes three arguments"
-    # a name for a gene set (genes in gene set will be determined by GetGeneSet())
-    # a column in the dataframe for the description of the cell lines (e.g. OncotreeLineage or OncotreeCode)
-    # a value in the given column to consider a hit for inclusion purposes (e.g. BRCA or TLL)
-Graph_n_write('Kevin', 'OncotreeCode', 'TLL')
-
-
-# ===========================================================================
-# 5 Function: Draw boxplot of all cancer dependencies for one gene
-# =============================================================================
-
-import seaborn as sns
 
 def PlotOneGene(
     gene,
     highlighted_cancer_types,
-    df_cl_col='OncotreeSubtype', # E.g. OncotreeSubtype, OncotreeLineage, OncotreePrimaryDisease
+    df_cl_col='DepmapModelType', # E.g. OncotreeSubtype, OncotreeLineage, OncotreePrimaryDisease, DepmapModelType
     fig_width=30,
     fig_height=8,
     min_samples=5,
@@ -179,97 +118,66 @@ def PlotOneGene(
     plt.tight_layout()
     plt.show()
 
-# ===========================================================================
-# 6 Function: Scan all genes and find the lowest (most dependent) scores for a cancer - Then plot it
-# =============================================================================
+def Graph_n_write(gene_set, filter_column, filter_content):
+
+    df_cl_filtered = df_cl[df_cl[filter_column] == filter_content]
+
+    df_merged = pd.merge(df_cl_filtered, df_dm, left_on='ModelID', right_on='Depmap Id')
+
+    gene_columns = df_dm.select_dtypes(include='number').columns
+    mean_values =  df_merged[gene_columns].mean().sort_values()
+
+    df_means = pd.DataFrame({
+        'Gene': mean_values.index,
+        'mean_CRISPR_score': mean_values.values
+    })
+
+    fig, ax = plt.subplots(figsize=(8,5), dpi=200)
+    plt.scatter(range(len(mean_values)), mean_values, color='black', alpha=1, s=10, zorder=2, label='gene dependency score')
+    plt.xlabel('Ranked depmap average', fontsize=18)
+    plt.ylabel('mean CRISPR score', fontsize=18)
+    plt.tick_params(axis='both', labelsize=12)
+    plt.title('DepMap means filtered by: %s' %(filter_content), fontsize=20)
+    plt.hlines(0,0, len(gene_columns), color='black', alpha=0.5)
+
+    highlight_genes = KTC_GetGeneSet(gene_set)
+    if len(highlight_genes) != 0:
+        genes  = mean_values.index
+        ranks  = range(len(genes))
+        scores = mean_values.values
+        highlight_indices = [i for i, gene in enumerate(genes) if gene in highlight_genes]
+        highlight_ranks = np.array(ranks)[highlight_indices]
+        highlight_scores = np.array(scores)[highlight_indices]
+        background_scores = [r for r in scores if r not in highlight_scores]
+        highlight_scores = [score for score in highlight_scores if not np.isnan(score)]
+        background_scores = [score for score in background_scores if not np.isnan(score)]
+
+        stat, p_value = mannwhitneyu(highlight_scores, background_scores, alternative='two-sided')
+        for rank, score in zip(highlight_ranks, highlight_scores):
+            plt.vlines(x=rank, ymin=min(scores), ymax=max(scores), color='red', linewidth=0.5, zorder=1, label= '%s (%.0f, p=%f)' %(gene_set, stat, p_value))
 
 
-def FindTopNGenesWithLowestMedianForCancerType(cancer_type, n=5):
-    # Merge df_dm with df_cl to include OncotreeSubtype for each ModelID
-    df_dm_merged = pd.merge(
-        df_dm.rename(columns={'Depmap Id': 'ModelID'}), 
-        df_cl[['ModelID', 'OncotreeSubtype']], 
-        on='ModelID'
-    )
-    
-    # Filter to include only rows with the specified cancer type
-    cancer_type_df = df_dm_merged[df_dm_merged['OncotreeSubtype'] == cancer_type]
-    
-    # Select only numeric columns representing gene expression (excluding ModelID and OncotreeSubtype)
-    gene_columns = cancer_type_df.select_dtypes(include='number').columns
-    
-    # Calculate the median dependency score for each gene within the specific cancer type
-    medians = {gene: cancer_type_df[gene].median(skipna=True) for gene in gene_columns}
+    handles, labels = plt.gca().get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    plt.legend(by_label.values(), by_label.keys(), fontsize=12)
+    plt.show()
 
-    # Remove genes with NaN median scores
-    medians = {gene: median for gene, median in medians.items() if pd.notna(median)}
-
-    # Sort the medians dictionary by values (median scores) in ascending order
-    sorted_medians = sorted(medians.items(), key=lambda item: item[1])  # This gives you a list of (gene, median) tuples
-    
-    # Get the top n lowest genes
-    top_n_lowest_genes = [gene for gene, _ in sorted_medians[:n]]
-    
-    return top_n_lowest_genes
+    out_file = os.path.join(out, 'DEPMAP_%s_filtered.csv' %(filter_content))
+    print(f'file written to {out_file}')
+    print(df_means)
+    df_means.to_csv(out_file, index=False)
 
 
-
-# ===========================================================================
-# 7 Function: Scan all genes and find those were a specific cancer type has the lowest score - then plot them
-# =============================================================================
-
-def FindGenesWhereCancerTypeHasLowestMedian(target_cancer_type, min_models=6):
-    # merge
-    df_dm_merged = pd.merge(
-        df_dm.rename(columns={'Depmap Id': 'ModelID'}),
-        df_cl[['ModelID', 'OncotreeSubtype']],
-        on='ModelID'
-    )
-
-    # numeric conversion
-    gene_columns = df_dm_merged.columns.drop(['ModelID', 'OncotreeSubtype'])
-    df_dm_merged[gene_columns] = df_dm_merged[gene_columns].apply(pd.to_numeric, errors='coerce')
-
-    # count models per subtype
-    subtype_counts = df_dm_merged['OncotreeSubtype'].value_counts()
-
-    # keep only subtypes with enough samples
-    valid_subtypes = subtype_counts[subtype_counts >= min_models].index
-
-    if target_cancer_type not in valid_subtypes:
-        print(f"Target subtype has fewer than {min_models} models. Found {subtype_counts[target_cancer_type]}.")
-        return []
-
-    df_filt = df_dm_merged[df_dm_merged['OncotreeSubtype'].isin(valid_subtypes)]
-    grouped = df_filt.groupby('OncotreeSubtype')
-
-    genes = []
-
-    for gene in gene_columns:
-        med = grouped[gene].median()
-        if pd.isna(med.get(target_cancer_type)):
-            continue
-        if med[target_cancer_type] == med.min():
-            genes.append(gene)
-
-    return genes
-
-
-# Function to plot each gene in the list
-def PlotGenesWithLowestMedian(target_cancer_type, genes_to_plot):
-    for gene in genes_to_plot:
-        PlotOneGene(gene, [target_cancer_type])
-
-def HeatmapSpecificGenes(gene_set, cancers='All', min_samples=10, fig_width=8, fig_height=6, annotate_values=True, title='Cancer dependency (DepMap)'):
+def HeatmapSpecificGenes(gene_set, df_cl_col='DepmapModelType', cancers='All', min_samples=10, fig_width=8, fig_height=6, annotate_values=True, title='Cancer dependency (DepMap)'):
     dict_input = {}
     if cancers=='All':
-        qualifying_cancers = df_cl['OncotreeCode'].value_counts()[df_cl['OncotreeCode'].value_counts()>min_samples].index.tolist()
+        qualifying_cancers = df_cl[df_cl_col].value_counts()[df_cl[df_cl_col].value_counts()>min_samples].index.tolist()
         for cancer in qualifying_cancers:
             # if cancer not in dict_input:
-            dict_input[cancer] = ['OncotreeCode', cancer]
+            dict_input[cancer] = [df_cl_col, cancer]
     else:
         for cancer in cancers:
-            dict_input[cancer] = ['OncotreeCode', cancer]
+            dict_input[cancer] = [df_cl_col, cancer]
 
     # Initialize a dataframe to store mean values for each cancer type
     mean_expression_data = pd.DataFrame()
@@ -321,145 +229,34 @@ def HeatmapSpecificGenes(gene_set, cancers='All', min_samples=10, fig_width=8, f
     plt.savefig(out_path)
     plt.show()
 
-def compare_cancers(target_cancer, comparison_cancers=None, min_samples=10, top_n=20, use_absolute_difference=False, fig_width=30, fig_height=6):
-    # If comparison_cancers is None, include all cancers with at least min_samples
-    if comparison_cancers is None:
-        comparison_cancers = (
-            df_cl['OncotreeCode']
-            .value_counts()
-            [df_cl['OncotreeCode'].value_counts() > min_samples]
-            .index.tolist()
-        )
-        if target_cancer in comparison_cancers:
-            comparison_cancers.remove(target_cancer)
 
-    # Create a dictionary of cancers for filtering
-    dict_input = {cancer: ['OncotreeCode', cancer] for cancer in comparison_cancers + [target_cancer]}
-
-    # Initialize a dataframe to store mean values for each cancer type
-    mean_expression_data = pd.DataFrame()
-
-    # Loop through each cancer type to filter, merge, and compute mean scores
-    for cancer, filter_params in dict_input.items():
-        filter_column = filter_params[0]
-        filter_content = filter_params[1]
-
-        # Filter and merge data
-        df_cl_filtered = df_cl[df_cl[filter_column] == filter_content]
-        df_merged = pd.merge(df_cl_filtered, df_dm, left_on='ModelID', right_on='Depmap Id')
-
-        # Select only numeric columns representing gene expression data
-        gene_columns = df_dm.select_dtypes(include='number').columns
-
-        # Compute mean CRISPR score for each gene
-        mean_values = df_merged[gene_columns].mean()
-
-        # Append results to mean_expression_data with cancer type as index
-        mean_expression_data[cancer] = mean_values
-
-    # Remove genes with NaN values in any cancer type
-    mean_expression_data_clean = mean_expression_data.dropna()
-
-    if mean_expression_data_clean.empty:
-        print("Error: No valid gene expression data available for plotting. Check your data.")
-        return
-
-    # Calculate differences for target cancer vs the mean of the comparison cancers
-    differences = {}
-    for gene in tqdm(mean_expression_data_clean.index, desc="Calculating differences"):
-        target_value = mean_expression_data_clean.loc[gene, target_cancer]
-        mean_comparison = mean_expression_data_clean.loc[gene, comparison_cancers].mean()
-        if use_absolute_difference:
-            differences[gene] = abs(target_value - mean_comparison)  # Absolute difference
-        else:
-            differences[gene] = target_value - mean_comparison  # Negative difference
-
-    # Sort genes based on the chosen difference type and select top genes
-    sorted_genes = sorted(differences.items(), key=lambda x: x[1], reverse=use_absolute_difference)
-
-    # Extract only the gene names from the sorted list
-    top_genes = [gene for gene, _ in sorted_genes][:top_n]
-
-    # Subset data for the top genes
-    top_genes_data = mean_expression_data_clean.loc[top_genes]
-
-    if top_genes_data.empty:
-        print(f"Error: No valid data for the top {top_n} genes.")
-        return
-
-    # Add a column for the calculated differences
-    top_genes_data[f'{target_cancer} vs Comparison Mean'] = [
-        differences[gene] for gene in top_genes
-    ]
-
-    # Plot the heatmap
-    plt.figure(figsize=(fig_width, fig_height), dpi=100)
-    sns.heatmap(
-        top_genes_data,
-        cmap='coolwarm_r',
-        annot=True,
-        fmt='.2f',
-        linewidths=0.5,
-        cbar_kws={'label': 'Expression'}
+def FindTopNGenesWithLowestMedianForCancerType(cancer_type, n=5):
+    # Merge df_dm with df_cl to include OncotreeSubtype for each ModelID
+    df_dm_merged = pd.merge(
+        df_dm.rename(columns={'Depmap Id': 'ModelID'}), 
+        df_cl[['ModelID', 'OncotreeSubtype']], 
+        on='ModelID'
     )
-    if len(comparison_cancers) >= 5:
-        comparison_cancers = 'others'
-    title = f'Top {top_n} Genes: {target_cancer} vs {comparison_cancers} ( Largest {"absolute" if use_absolute_difference else "negative"} difference)'
-    plt.title(title, fontsize=14)
-    plt.xlabel('Cancer Types', fontsize=12)
-    plt.ylabel('Genes', fontsize=12)
-    plt.xticks(rotation=45, ha='right', fontsize=10)
-    plt.show()
+    
+    # Filter to include only rows with the specified cancer type
+    cancer_type_df = df_dm_merged[df_dm_merged['OncotreeSubtype'] == cancer_type]
+    
+    # Select only numeric columns representing gene expression (excluding ModelID and OncotreeSubtype)
+    gene_columns = cancer_type_df.select_dtypes(include='number').columns
+    
+    # Calculate the median dependency score for each gene within the specific cancer type
+    medians = {gene: cancer_type_df[gene].median(skipna=True) for gene in gene_columns}
 
-#%% ===========================================================================
-# 8 Boxplot analysis proper
-# =============================================================================
+    # Remove genes with NaN median scores
+    medians = {gene: median for gene, median in medians.items() if pd.notna(median)}
 
-
-#%% Plot for a single gene
-
-# PlotOneGene(gene='NAMPT',
-#             highlighted_cancer_types='Lymphoid',
-#             df_cl_col='OncotreeLineage',
-#             fig_width=10,
-#             fig_height=8,
-#             min_samples=40,
-#             horizontal=True
-#             )
-
-PlotOneGene(gene='METTL3',
-            highlighted_cancer_types=['TLL', 'AML', 'BLL'],
-            df_cl_col='OncotreeCode',
-            fig_width=12,
-            fig_height=5,
-            min_samples=5,
-            horizontal=False
-            )
-
-
-
-#%% Find the top n lowest scores (regardless of the score of other cancers) for a specific cancer and plot them
-target_cancer_type = 'T-Lymphoblastic Leukemia/Lymphoma'
-highlighted_cancer_types = ['T-Lymphoblastic Leukemia/Lymphoma']
-top_n_genes = FindTopNGenesWithLowestMedianForCancerType(target_cancer_type, n=5)
-for _gene in top_n_genes:
-    PlotOneGene(_gene, highlighted_cancer_types, df_cl_col='OncotreePrimaryDisease')
-
-#%% Find all genes where the specified cancer type has the lowest median score
-
-target_cancer_type = 'T-Lymphoblastic Leukemia/Lymphoma'
-genes_with_lowest_in_target = FindGenesWhereCancerTypeHasLowestMedian(target_cancer_type)
-# for gene in genes_with_lowest_in_target:
-    # print(gene)
-# print('{target_cancer_type} has the lowest median score for {len(genes_with_lowe)}')
-
-PlotGenesWithLowestMedian(target_cancer_type, genes_with_lowest_in_target)
-print(f'Genes for which {target_cancer_type} has the lowest score:')
-for _gene in genes_with_lowest_in_target:
-    print(f'\t{_gene}')
-
-
-#%% Test 8
+    # Sort the medians dictionary by values (median scores) in ascending order
+    sorted_medians = sorted(medians.items(), key=lambda item: item[1])  # This gives you a list of (gene, median) tuples
+    
+    # Get the top n lowest genes
+    top_n_lowest_genes = [gene for gene, _ in sorted_medians[:n]]
+    
+    return top_n_lowest_genes
 
 def get_gene_medians(gene, df_cl_col='OncotreeSubtype', min_samples=5):
     df_dm_gene = df_dm[['Depmap Id', gene]].rename(columns={'Depmap Id': 'ModelID'})
@@ -472,7 +269,6 @@ def get_gene_medians(gene, df_cl_col='OncotreeSubtype', min_samples=5):
 
     med = df_merged.groupby(df_cl_col)[gene].median()
     return med
-
 
 def FindGenesWhereCancerTypeHasLowestMedian(
     target,
@@ -510,39 +306,195 @@ def FindGenesWhereCancerTypeHasLowestMedian(
 
     return genes_with_lowest
 
+def Scatter_CellLines(
+    df_dm: pd.DataFrame,
+    df_cl: pd.DataFrame,
+    gene: str,
+    *,
+    model_type: str | None = None,
+    oncotree_subtype: str | None = None,
+    oncotree_lineage: str | None = None,
+    query: str | None = None,
 
-target_cancer_type  = 'TLL'
-highlighted_cancers = ['TLL', 'AML', 'BLL']
-min_samples         = 6
-max_score           = -1.0
+    dep_id_col: str = "Depmap Id",
+    meta_id_col: str = "ModelID",
+    name_col: str = "StrippedCellLineName",
 
-genes_with_lowest_in_target = FindGenesWhereCancerTypeHasLowestMedian(
-    target_cancer_type,
-    df_cl_col='OncotreeCode',
-    min_samples=min_samples,
-    unique_min=False,
-    max_score=max_score
-)
+    sort_ascending: bool = True,
+    highlight: set[str] | None = None,
+    label: str | None = "highlight",     # "highlight", "all", "none"
+    top_n_labels: int = 0,
 
-# print(f"{target_cancer_type} has the lowest score with (max score of {max_score}) for {len(genes_with_lowest_in_target)} genes:")
-print()
-for gene in genes_with_lowest_in_target:
-    print(gene)
-print()
-print(f"{target_cancer_type} has the lowest score with (max score of {max_score}) for {len(genes_with_lowest_in_target)} genes")
+    figsize: tuple[int, int] = (9, 5),
+    dpi: int = 200,
+    point_size: int = 25,
+    yline0: bool = True,
+    title: str | None = None,
+):
+    """
+    Plot Chronos gene dependency for a subset of DepMap models.
+    More negative Chronos => stronger dependency.
+    """
+
+    if gene not in df_dm.columns:
+        raise ValueError(f"Gene '{gene}' not found in df_dm columns.")
+
+    # --- Dependency matrix ---
+    df_dep = df_dm.copy()
+    if dep_id_col in df_dep.columns:
+        df_dep = df_dep.set_index(dep_id_col)
+    df_dep.index = df_dep.index.astype(str)
+
+    # --- Metadata ---
+    df_meta = df_cl.copy()
+    df_meta[meta_id_col] = df_meta[meta_id_col].astype(str)
+
+    subset = df_meta
+
+    if model_type is not None:
+        subset = subset[subset["DepmapModelType"] == model_type]
+
+    if oncotree_subtype is not None:
+        subset = subset[subset["OncotreeSubtype"] == oncotree_subtype]
+
+    if oncotree_lineage is not None:
+        subset = subset[subset["OncotreeLineage"] == oncotree_lineage]
+
+    if query is not None:
+        subset = subset.query(query)
+
+    print("Models in subset:", len(subset))
+
+    common_ids = pd.Index(subset[meta_id_col]).intersection(df_dep.index)
+    print("Overlap with dependency matrix:", len(common_ids))
+
+    if len(common_ids) == 0:
+        raise ValueError("No overlapping models.")
+
+    subset = subset[subset[meta_id_col].isin(common_ids)].copy()
+    dep_sub = df_dep.loc[common_ids].copy()
+
+    name_map = subset.set_index(meta_id_col)[name_col].to_dict()
+    dep_sub["CellLine"] = [name_map.get(mid, mid) for mid in dep_sub.index]
+    dep_sub["ModelID"] = dep_sub.index
+
+    dep_plot = dep_sub[["ModelID", "CellLine", gene]].copy()
+    dep_plot[gene] = pd.to_numeric(dep_plot[gene], errors="coerce")
+    dep_sorted = dep_plot.sort_values(gene, ascending=sort_ascending).reset_index(drop=True)
+
+    # --- Plot ---
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+
+    x = np.arange(len(dep_sorted))
+    y = dep_sorted[gene].values
+
+    ax.scatter(x, y, s=point_size, alpha=0.8)
+    ax.grid(True, linewidth=0.5, alpha=0.4)
+
+    if yline0:
+        ax.axhline(0, linewidth=1, alpha=0.6)
+
+    hl = set(highlight or [])
+    label_mode = (label or "highlight").lower()
+
+    def should_label(cellline: str, rank: int):
+        if label_mode == "all":
+            return True
+        if label_mode == "none":
+            return False
+        if cellline in hl:
+            return True
+        if top_n_labels and rank < top_n_labels:
+            return True
+        return False
+
+    # Highlight points
+    if hl:
+        for i, row in dep_sorted.iterrows():
+            if row["CellLine"] in hl:
+                ax.scatter(i, row[gene], s=point_size * 3)
+
+    # --- Create text objects ---
+    texts = []
+    for i, row in dep_sorted.iterrows():
+        if should_label(str(row["CellLine"]), i):
+            txt = ax.text(i, row[gene], row["CellLine"], fontsize=9)
+            texts.append(txt)
+
+    # --- Adjust text positions ---
+    if texts:
+        adjust_text(
+            texts,
+            ax=ax,
+            expand_points=(1.2, 1.4),
+            expand_text=(1.2, 1.4),
+            arrowprops=dict(arrowstyle="-", linewidth=0.5, alpha=0.6),
+        )
+
+    ax.set_ylabel("Chronos Gene Effect (lower = stronger dependency)")
+    ax.set_xticks([])
+
+    subset_desc = []
+    if model_type: subset_desc.append(f"DepmapModelType={model_type}")
+    if oncotree_subtype: subset_desc.append(f"OncotreeSubtype={oncotree_subtype}")
+    if oncotree_lineage: subset_desc.append(f"OncotreeLineage={oncotree_lineage}")
+    if query: subset_desc.append(f"query={query}")
+
+    default_title = f"{gene} dependency"
+    if subset_desc:
+        default_title += " (" + ", ".join(subset_desc) + ")"
+
+    ax.set_title(title or default_title)
+
+    plt.tight_layout()
+    plt.show()
+
+    return dep_sorted
+
+#%% ===========================================================================
+# 4 Waterfall plot showing dependencies of input genes
+# =============================================================================
+
+# Graph_n_write takes three arguments"
+    # a name for a gene set (genes in gene set will be determined by GetGeneSet())
+    # a column in the dataframe for the description of the cell lines (e.g. OncotreeLineage or OncotreeCode)
+    # a value in the given column to consider a hit for inclusion purposes (e.g. BRCA or TLL)
+Graph_n_write('SG', 'DepmapModelType', 'TALL')
 
 
+#%% ===========================================================================
+# 5 Function: Draw boxplot of all cancer dependencies for one gene
+# =============================================================================
+
+import seaborn as sns
+
+gene = 'MTOR'
+highlighted_cancer_types = ['TALL', 'BALL', 'AML']
+df_cl_col='DepmapModelType' # E.g. OncotreeSubtype, OncotreeLineage, OncotreePrimaryDisease, DepmapModelType
+fig_width=12
+fig_height=4
+min_samples=6
+horizontal=False
+
+PlotOneGene(gene, highlighted_cancer_types, df_cl_col=df_cl_col, min_samples=min_samples, horizontal=horizontal, fig_width=fig_width, fig_height=fig_height)
 
 
-for gene in genes_with_lowest_in_target:
-    PlotOneGene(
-        gene,
-        highlighted_cancers,
-        df_cl_col='OncotreeCode',
-        min_samples=min_samples,
-        fig_width=10,
-        fig_height=5
-    )
+#%% ===========================================================================
+# 7 Function: Scan all genes and find those were a specific cancer type has the lowest score - then plot them
+# =============================================================================
+
+
+target_cancer = 'TALL'
+df_cl_col     = 'DepmapModelType'
+min_samples   = 6
+fig_height    = 6
+fig_width     = 12
+max_score     = -1.0
+
+genes = FindGenesWhereCancerTypeHasLowestMedian(target_cancer, df_cl_col=df_cl_col, min_samples=min_samples, max_score=max_score,)
+
+for gene in genes:
+    PlotOneGene(gene, highlighted_cancer_types=[target_cancer], min_samples=min_samples, fig_width=fig_width, fig_height=fig_height)
 
 
 
@@ -551,155 +503,50 @@ for gene in genes_with_lowest_in_target:
 # =============================================================================
 
 
+gene_set    = KTC_GetGeneSet('SG')
+df_cl_col   = 'DepmapModelType'
+cancers     = ['TALL', 'BALL', 'AML']
+min_samples = 6
+fig_width   = 3
+fig_height  = 4
+annot_vals  = False
+title       ='Cancer dependency (DepMap)'
 
-# HeatmapSpecificGenes(KTC_GetGeneSet('WTAP'), cancers=['AML', 'BLL', 'TLL'], fig_width=4, fig_height=6, annotate_values=True)
-# HeatmapSpecificGenes(KTC_GetGeneSet(['DHFR', 'NAMPT', 'IDO1', 'NAPRT']), cancers=['AML', 'BLL', 'TLL'], fig_width=4, fig_height=6, annotate_values=True)
-# HeatmapSpecificGenes(KTC_GetGeneSet('IGF2BP2_targets'), cancers='All', fig_width=15, fig_height=10, annotate_values=False)
-# HeatmapSpecificGenes(up_genes, fig_width=4, fig_height=10, annotate_values=True, min_samples=9)
-# HeatmapSpecificGenes(['CLK1', 'CLK2', 'CLK3', 'CLK4'], cancers='All', fig_width=40, fig_height=6, annotate_values=True, min_samples=9)
-HeatmapSpecificGenes(gene_list, fig_width=15, fig_height=30, annotate_values=False, min_samples=15)
-# HeatmapSpecificGenes(KTC_GetGeneSet('Kevin'), cancers='All', fig_width=40, fig_height=8, min_samples=10)
-# HeatmapSpecificGenes(KTC_Get, cancers='All', min_samples=10, fig_width=40, fig_height=15, title='top genes based on KM p vals')
 
-#%% ===========================================================================
-# 10 Heatmaps - finding the top absolute differential dependencies between one cancer and a set (or all) others
+HeatmapSpecificGenes(gene_set=gene_set, df_cl_col=df_cl_col, cancers=cancers, min_samples=min_samples, fig_width=fig_width, fig_height=fig_height, annotate_values=annot_vals, title=title)
+
+#%% =============================================================================
+# Scatter plot of cell lines 
 # =============================================================================
-from tqdm import tqdm
-import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
 
-dict_input = {
-    'AML' : ['OncotreeCode', 'AML'],
-    'B-ALL' : ['OncotreeCode', 'BLL'],
-    'T-ALL' : ['OncotreeCode', 'TLL']
-    }
+# -----------------------------
+# DepMap dependency plot config
+# -----------------------------
 
-from tqdm import tqdm
-import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
+gene                = "MEN1"
+
+# How to subset cancers
+model_type          = 'TALL'            # e.g. "TALL", "AML", None
+oncotree_subtype    = None              # e.g. "Acute Myeloid Leukemia"
+oncotree_lineage    = None              # e.g. "Lymphoid"
+query               = None              # optional pandas query
+
+# Labeling behavior
+highlight_lines     = []  # set() if none
+label_mode          = "all"       # "highlight", "all", "none"
+top_n_labels        = 0
+
+# Plot aesthetics
+sort_ascending      = True
+fig_width           = 8
+fig_height          = 5
+dpi                 = 200
+point_size          = 30
+draw_zero_line      = True
+title               = "dependency (DepMap)"
+
+df_dep_plot = Scatter_CellLines(df_dm=df_dm, df_cl=df_cl, gene=gene, model_type=model_type, oncotree_subtype=oncotree_subtype, oncotree_lineage=oncotree_lineage, query=query, sort_ascending=sort_ascending, highlight=highlight_lines, label=label_mode, top_n_labels=top_n_labels, figsize=(fig_width, fig_height), dpi=dpi, point_size=point_size, yline0=draw_zero_line, title=title,)
 
 
-
-# Usage
-# compare_cancers(target_cancer='AML', comparison_cancers=None, min_samples=10, top_n=20, use_absolute_difference=False, fig_width=30, fig_height=6)
-# compare_cancers(target_cancer='TLL', comparison_cancers=['BLL', 'AML'], min_samples=10, top_n=20, use_absolute_difference=True, fig_width=8, fig_height=6)
-compare_cancers(target_cancer='TLL', comparison_cancers=None, min_samples=10, top_n=20, use_absolute_difference=True, fig_width=8, fig_height=6)
-
-#%% ===========================================================================
-# Section 11: Same as above, but ranked by relative differences instead of absolute differences
-# =============================================================================
-from tqdm import tqdm
-import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
-
-# Boolean to toggle between absolute difference or most negative difference
-top_n = 20  # After sorting, how many genes are plotted
-expression_threshold = 0.03  # Threshold for absolute expression value
-
-# Initialize a dataframe to store mean values for each cancer type
-mean_expression_data = pd.DataFrame()
-
-# Loop through each cancer type to filter, merge, and compute mean scores
-for cancer, filter_params in dict_input.items():
-    filter_column = filter_params[0]
-    filter_content = filter_params[1]
-    
-    # Filter and merge data
-    df_cl_filtered = df_cl[df_cl[filter_column] == filter_content]
-    df_merged = pd.merge(df_cl_filtered, df_dm, left_on='ModelID', right_on='Depmap Id')
-    
-    # Select only numeric columns representing gene expression data
-    gene_columns = df_dm.select_dtypes(include='number').columns
-    
-    # Compute mean CRISPR score for each gene
-    mean_values = df_merged[gene_columns].mean()
-    
-    # Append results to mean_expression_data with cancer type as index
-    mean_expression_data[cancer] = mean_values
-
-# Remove genes with NaN values in any cancer type
-mean_expression_data_clean = mean_expression_data.dropna()
-
-# Filter genes based on absolute expression threshold for all cancer types (T-ALL, AML, B-ALL)
-filtered_mean_expression_data = mean_expression_data_clean[
-    (mean_expression_data_clean['T-ALL'].abs() >= expression_threshold) &
-    (mean_expression_data_clean['AML'].abs() >= expression_threshold) &
-    (mean_expression_data_clean['B-ALL'].abs() >= expression_threshold)
-]
-
-# Calculate relative differences for T-ALL vs AML and B-ALL
-differences = {}
-
-for gene in tqdm(filtered_mean_expression_data.index, desc="Calculating relative differences"):
-    tall_value = filtered_mean_expression_data.loc[gene, 'T-ALL']
-    mean_aml_b_all = filtered_mean_expression_data.loc[gene, ['AML', 'B-ALL']].mean()
-    
-    # Calculate relative difference (percentage difference)
-    if mean_aml_b_all != 0:
-        relative_difference = ((tall_value - mean_aml_b_all) / mean_aml_b_all) + 1
-    else:
-        relative_difference = 0  # If the mean of AML and B-ALL is 0, avoid division by zero
-    
-    differences[gene] = relative_difference
-
-# Filter genes based on the threshold for absolute relative difference
-filtered_differences = {gene: diff for gene, diff in differences.items() if abs(diff) >= expression_threshold}
-
-# Sort genes based on the relative difference and select top genes
-sorted_genes = sorted(filtered_differences.items(), key=lambda x: x[1], reverse=True)  # False to find most negative
-
-# Extract only the gene names from the sorted list
-top_genes = [gene for gene, _ in sorted_genes][:top_n]
-
-# Subset data for the top genes
-top_genes_data = filtered_mean_expression_data.loc[top_genes]
-
-# Add a column for the calculated relative differences
-top_genes_data['relative T-ALL vs Mean(AML & B-ALL)'] = [
-    filtered_differences[gene] for gene in top_genes
-]
-
-# Create a mask where the difference column is True (hidden for coloring)
-mask = top_genes_data.columns == 'relative T-ALL vs Mean(AML & B-ALL)'
-mask = [False, False, False, True]  # Set 'True' for the last column to mask its color
-
-# Plot the heatmap with the new difference column
-plt.figure(figsize=(5, 6), dpi=100)  # Adjust width for the additional column
-
-# Create a custom color map for the gene expression columns
-cmap = sns.diverging_palette(220, 20, as_cmap=True)  # Diverging color palette
-cmap_reversed = cmap.reversed()  # Reverse the color map
-
-sns.heatmap(
-    top_genes_data,
-    cmap=cmap_reversed,  # Apply color map for expression data
-    annot=True,
-    fmt='.2f',  # Control formatting for annotations
-    linewidths=0.5,
-    cbar_kws={'label': 'Expression'},
-    mask=mask,  # Mask the difference column for coloring
-    linecolor='white',  # White line between cells
-    annot_kws={"size": 10, 'weight': 'normal'}  # Make the annotations bold and readable
-)
-
-# Overlay annotations for the 'T-ALL vs Mean(AML & B-ALL)' column
-for i, gene in enumerate(top_genes):
-    # Positioning the text to be centered in the last column
-    plt.text(
-        x=len(top_genes_data.columns)-0.5,  # Last column
-        y=i + 0.5,  # Centered in the row
-        s=f'{top_genes_data.loc[gene, "relative T-ALL vs Mean(AML & B-ALL)"]:.2f}',
-        ha='center', va='center', fontsize=10, color='black', weight='normal'
-    )
-
-# Plot styling
-title =f'Top {top_n} Genes: T-ALL vs AML & B-ALL (largest fold difference)'
-plt.title(title)
-plt.xlabel(f'Cancer Types and Difference (min cutoff: {expression_threshold})')
-plt.ylabel('Genes')
-plt.show()
 
 
