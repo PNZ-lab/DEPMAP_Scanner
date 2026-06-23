@@ -31,7 +31,7 @@ from adjustText import adjust_text
 
 
 
-in_dir = '/Volumes/kachrist/shares/cmgg_pnlab/Kasper/Data/Interesting_Lists'
+in_dir = '/Volumes/cmgg_pnlab/Kasper/Data/Interesting_Lists'
 
 # in_dm = os.path.join(in_dir, 'CRISPRGeneEffect_Q42024.csv')
 in_dm = os.path.join(in_dir, 'CRISPRGeneEffect_2025Q3.csv')
@@ -208,7 +208,7 @@ def HeatmapSpecificGenes(gene_set, df_cl_col='DepmapModelType', cancers='All', m
     # mean_expression_data will already have genes as rows and cancers as columns
     
     if cancers=='All':
-        desired_order = ['AML', 'BLL', 'TLL']
+        desired_order = ['AML', 'BALL', 'TALL']
         
         #Combine desired columns with the remaining columns
         remaining_columns = [col for col in mean_expression_data.columns if col not in desired_order]
@@ -328,6 +328,7 @@ def Scatter_CellLines(
     figsize: tuple[int, int] = (9, 5),
     dpi: int = 200,
     point_size: int = 25,
+    highlight_color: str = "tab:orange",
     yline0: bool = True,
     title: str | None = None,
 ):
@@ -412,7 +413,7 @@ def Scatter_CellLines(
     if hl:
         for i, row in dep_sorted.iterrows():
             if row["CellLine"] in hl:
-                ax.scatter(i, row[gene], s=point_size * 3)
+                ax.scatter(i, row[gene], s=point_size * 3, color=highlight_color)
 
     # --- Create text objects ---
     texts = []
@@ -468,7 +469,7 @@ Graph_n_write('SG', 'DepmapModelType', 'TALL')
 
 import seaborn as sns
 
-gene = 'MTOR'
+gene = 'TRMT12'
 highlighted_cancer_types = ['TALL', 'BALL', 'AML']
 df_cl_col='DepmapModelType' # E.g. OncotreeSubtype, OncotreeLineage, OncotreePrimaryDisease, DepmapModelType
 fig_width=12
@@ -503,12 +504,13 @@ for gene in genes:
 # =============================================================================
 
 
-gene_set    = KTC_GetGeneSet('SG')
+gene_set    = ['TRMT12', 'NF1']
 df_cl_col   = 'DepmapModelType'
 cancers     = ['TALL', 'BALL', 'AML']
+cancers     = 'All'
 min_samples = 6
-fig_width   = 3
-fig_height  = 4
+fig_width   = 30
+fig_height  = 3
 annot_vals  = False
 title       ='Cancer dependency (DepMap)'
 
@@ -523,7 +525,7 @@ HeatmapSpecificGenes(gene_set=gene_set, df_cl_col=df_cl_col, cancers=cancers, mi
 # DepMap dependency plot config
 # -----------------------------
 
-gene                = "MEN1"
+gene                = 'TRMT12'
 
 # How to subset cancers
 model_type          = 'TALL'            # e.g. "TALL", "AML", None
@@ -532,21 +534,18 @@ oncotree_lineage    = None              # e.g. "Lymphoid"
 query               = None              # optional pandas query
 
 # Labeling behavior
-highlight_lines     = []  # set() if none
+highlight_lines     = ['MOLM13', 'MOLM14', 'MV411', 'OCIAML2', 'THP1', 'SHI1']  # set() if none
+highlight_lines     = []
 label_mode          = "all"       # "highlight", "all", "none"
 top_n_labels        = 0
 
 # Plot aesthetics
 sort_ascending      = True
-fig_width           = 8
-fig_height          = 5
+fig_width           = 5
+fig_height          = 4
 dpi                 = 200
 point_size          = 30
 draw_zero_line      = True
-title               = "dependency (DepMap)"
+title               = None
 
 df_dep_plot = Scatter_CellLines(df_dm=df_dm, df_cl=df_cl, gene=gene, model_type=model_type, oncotree_subtype=oncotree_subtype, oncotree_lineage=oncotree_lineage, query=query, sort_ascending=sort_ascending, highlight=highlight_lines, label=label_mode, top_n_labels=top_n_labels, figsize=(fig_width, fig_height), dpi=dpi, point_size=point_size, yline0=draw_zero_line, title=title,)
-
-
-
-
