@@ -1,6 +1,49 @@
 # DEPMAP_Scanner.py:
 Note: This script requires KTC_functions.py (also on github) to be in the same directory as this file.
 
+## New script: TALL dependency discovery
+
+Use [TALL_dependency_discovery.py](TALL_dependency_discovery.py) to find genes that are selectively essential in TALL while avoiding pan-essential hits.
+
+IDE-first usage (load variables once):
+- Open [TALL_dependency_discovery.py](TALL_dependency_discovery.py)
+- Execute setup cells once
+- Edit the IDE SETTINGS block near the top once
+- Run the final "Run analysis" cell whenever you want to refresh results
+- Data is cached in memory between runs; use run_ide(force_reload=True) only when input CSV paths change
+
+The script combines:
+- Mean and median shift in TALL vs all non-TALL models
+- Essential fraction shift using a configurable dependency threshold
+- One-sided Mann-Whitney U test with BH/FDR correction
+- Global essentiality penalty/filter to remove broad housekeeping dependencies
+
+Output files:
+- TALL_dependency_gene_stats.csv: full metrics table for all genes
+- TALL_dependency_candidates.csv: filtered high-confidence candidates
+
+## New script: Per-gene relative visualization
+
+Use [TALL_candidate_relative_plots.py](TALL_candidate_relative_plots.py) to inspect candidate genes one-by-one across cancers using per-gene relative effect plots.
+
+This is useful when heatmaps look skewed by shared color scaling.
+
+Example:
+
+        python TALL_candidate_relative_plots.py \
+            --dependency-csv /Users/kachrist/Desktop/Interesting_Lists/CRISPRGeneEffect_2025Q3.csv \
+            --model-csv /Users/kachrist/Desktop/Interesting_Lists/DepMap_CellLine_annotation_2025Q3.csv \
+            --gene-file sweep_runs/strict_and_bcl11b_run_gene_sets.txt \
+            --group-column DepmapModelType \
+            --target-group TALL \
+            --highlight-groups TALL BALL AML \
+            --outdir sweep_runs/relative_gene_plots_strict_bcl
+
+Outputs:
+- gene_plot_summary.csv (target rank and effect per gene)
+- gene_stats/<gene>_cross_cancer_stats.csv (per-cancer table)
+- gene_plots/<gene>_cross_cancer_relative.png (relative + absolute panels)
+
 This script has three main purposes:
 1. Scan a subset of cell lines and output it's dependencies for all genes
 2. Scan all cancer types and identify genes with lowest (most dependent) CRISPR scores.

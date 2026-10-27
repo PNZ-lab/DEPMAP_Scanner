@@ -23,11 +23,12 @@ Section 9 generates heatmaps for all or a subset of cancers for a subset of gene
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
-from scipy.stats import mannwhitneyu
+from scipy.stats import mannwhitneyu, pearsonr, spearmanr
 import numpy as np
 from KTC_functions import KTC_GetGeneSet
 from tqdm import tqdm
 from adjustText import adjust_text
+from typing import Literal
 
 
 
@@ -51,6 +52,81 @@ df_cl['OncotreeSubtype'] = df_cl['OncotreeSubtype'].replace({
     'Undifferentiated Pleomorphic Sarcoma/Malignant Fibrous Histiocytoma/High-Grade Spindle Cell Sarcoma':
     'UPS/MFHS/Spindle Cell Sarcoma'
 })
+
+# Optional preload for Section 10 (expression vs drug sensitivity).
+# This is loaded once with Section 2 and reused in Section 10.
+preload_section10_data = True
+df_expr_s10 = None
+df_drug_s10 = None
+df_prism_cell_meta_s10 = None
+df_drug_s10_source = None  # 'prism24q2_matrix' or 'long_table'
+
+if preload_section10_data:
+    try:
+        expr_candidates = [
+            os.path.join(in_dir, 'OmicsExpressionTPMLogp1HumanProteinCodingGenes26Q1.csv'),
+            os.path.join(in_dir, 'OmicsExpressionTPMLogp1HumanProteinCodingGenes.csv'),
+        ]
+        long_drug_candidates = [
+            os.path.join(in_dir, 'PRISMRepurposingPrimaryScreenDoseResponse.csv'),
+            os.path.join(in_dir, 'PRISMRepurposingSecondaryScreenDoseResponse.csv'),
+        ]
+        prism_matrix = os.path.join(in_dir, 'Repurposing_Public_24Q2_Extended_Primary_Data_Matrix.csv')
+        prism_compounds = os.path.join(in_dir, 'Repurposing_Public_24Q2_Extended_Primary_Compound_List.csv')
+        prism_cell_meta = os.path.join(in_dir, 'Repurposing_Public_24Q2_Cell_Line_Meta_Data.csv')
+
+        in_expr_preload = next((f for f in expr_candidates if os.path.exists(f)), None)
+        in_long_preload = next((f for f in long_drug_candidates if os.path.exists(f)), None)
+
+        if in_expr_preload is not None:
+            print(f'Section 2 preload: loading expression file: {in_expr_preload}')
+            df_expr_s10 = pd.read_csv(in_expr_preload, low_memory=False)
+        else:
+            print('Section 2 preload: expression file not found (Section 10 will attempt on-demand load).')
+
+        # Prefer 24Q2 matrix if present.
+        if os.path.exists(prism_matrix) and os.path.exists(prism_compounds):
+            print(f'Section 2 preload: loading PRISM 24Q2 matrix: {prism_matrix}')
+            print(f'Section 2 preload: loading PRISM 24Q2 compounds: {prism_compounds}')
+            _mat = pd.read_csv(prism_matrix, low_memory=False)
+            _cmp = pd.read_csv(prism_compounds, low_memory=False)
+
+            # Convert matrix to long format once during preload.
+            _id_col = _mat.columns[0]
+            _mat = _mat.rename(columns={_id_col: 'IDs'})
+            _model_cols = [c for c in _mat.columns if c != 'IDs']
+            _long = _mat.melt(id_vars='IDs', value_vars=_model_cols, var_name='ModelID', value_name='auc')
+            _long['auc'] = pd.to_numeric(_long['auc'], errors='coerce')
+            _long = _long.dropna(subset=['auc'])
+
+            _cmp_cols = [c for c in ['IDs', 'Drug.Name', 'screen', 'dose', 'MOA', 'repurposing_target'] if c in _cmp.columns]
+            _cmp_small = _cmp[_cmp_cols].copy()
+            _long = _long.merge(_cmp_small, on='IDs', how='left')
+            if 'Drug.Name' in _long.columns:
+                _long['inhibitor'] = _long['Drug.Name'].fillna(_long['IDs'])
+            else:
+                _long['inhibitor'] = _long['IDs']
+
+            _long['ModelID'] = _long['ModelID'].astype(str)
+            _long['inhibitor'] = _long['inhibitor'].astype(str)
+
+            df_drug_s10 = _long
+            df_drug_s10_source = 'prism24q2_matrix'
+
+            if os.path.exists(prism_cell_meta):
+                print(f'Section 2 preload: loading PRISM 24Q2 cell metadata: {prism_cell_meta}')
+                df_prism_cell_meta_s10 = pd.read_csv(prism_cell_meta, low_memory=False)
+
+        elif in_long_preload is not None:
+            print(f'Section 2 preload: loading long-format drug file: {in_long_preload}')
+            df_drug_s10 = pd.read_csv(in_long_preload, low_memory=False)
+            df_drug_s10_source = 'long_table'
+        else:
+            print('Section 2 preload: no drug file found (Section 10 will attempt on-demand load).')
+
+    except Exception as _e:
+        print(f'Section 2 preload warning: {_e}')
+        print('Section 10 can still run with on-demand loading.')
 
 #%% =============================================================================
 # Functions    
@@ -452,6 +528,681 @@ def Scatter_CellLines(
 
     return dep_sorted
 
+
+def _bh_fdr(p_values):
+    """Benjamini-Hochberg FDR correction for a 1D array-like of p-values."""
+    p = pd.Series(p_values, dtype='float64')
+    out = pd.Series(np.nan, index=p.index, dtype='float64')
+
+    valid = p.notna()
+    if valid.sum() == 0:
+        return out.values
+
+    pv = p[valid].values
+    m = len(pv)
+    order = np.argsort(pv)
+    ranked = pv[order]
+    q = ranked * m / (np.arange(1, m + 1))
+    q = np.minimum.accumulate(q[::-1])[::-1]
+    q = np.clip(q, 0, 1)
+
+    q_unsorted = np.empty_like(q)
+    q_unsorted[order] = q
+    out.loc[valid] = q_unsorted
+    return out.values
+
+
+def BuildDrugLong(
+    df_drug,
+    sample_col_candidates=('ModelID', 'model_id', 'Depmap_ID', 'depmap_id', 'Depmap Id'),
+    drug_col_candidates=('inhibitor', 'drug', 'compound', 'Drug', 'Compound'),
+    auc_col_candidates=('auc', 'AUC')
+):
+    """Standardize a drug table into: ModelID, inhibitor, auc."""
+    def pick_col(cols, cands, label):
+        for c in cands:
+            if c in cols:
+                return c
+        raise ValueError(f"Could not find a {label} column among {cands}. Available: {list(cols)}")
+
+    sample_col = pick_col(df_drug.columns, sample_col_candidates, 'sample ID')
+    drug_col = pick_col(df_drug.columns, drug_col_candidates, 'drug name')
+    auc_col = pick_col(df_drug.columns, auc_col_candidates, 'AUC')
+
+    out = df_drug.rename(
+        columns={sample_col: 'ModelID', drug_col: 'inhibitor', auc_col: 'auc'}
+    ).copy()
+
+    out = out.dropna(subset=['ModelID', 'inhibitor', 'auc'])
+    out['auc'] = pd.to_numeric(out['auc'], errors='coerce')
+    out = out.dropna(subset=['auc'])
+    out['ModelID'] = out['ModelID'].astype(str)
+    out['inhibitor'] = out['inhibitor'].astype(str)
+    return out
+
+
+def BuildDrugLongFromExtendedPrimary(
+    df_matrix,
+    df_compounds,
+    df_cell_meta=None,
+    culture_filter=None,
+):
+    """
+    Convert PRISM 24Q2 Extended Primary matrix (wide LFC table) to long format.
+
+    Output is standardized to columns: ModelID, inhibitor, auc.
+    Here, 'auc' stores LFC values so existing scan functions can be reused.
+    """
+    mat = df_matrix.copy()
+
+    # Matrix first column is typically unnamed and contains treatment IDs.
+    id_col = mat.columns[0]
+    mat = mat.rename(columns={id_col: 'IDs'})
+
+    model_cols = [c for c in mat.columns if c != 'IDs']
+    long = mat.melt(id_vars='IDs', value_vars=model_cols, var_name='ModelID', value_name='auc')
+    long['auc'] = pd.to_numeric(long['auc'], errors='coerce')
+    long = long.dropna(subset=['auc'])
+
+    cmp_cols = [c for c in ['IDs', 'Drug.Name', 'screen', 'dose', 'MOA', 'repurposing_target'] if c in df_compounds.columns]
+    cmp = df_compounds[cmp_cols].copy()
+    long = long.merge(cmp, on='IDs', how='left')
+
+    if 'Drug.Name' in long.columns:
+        long['inhibitor'] = long['Drug.Name'].fillna(long['IDs'])
+    else:
+        long['inhibitor'] = long['IDs']
+
+    if df_cell_meta is not None and culture_filter is not None:
+        culture_vals = [culture_filter] if isinstance(culture_filter, str) else list(culture_filter)
+        if 'depmap_id' not in df_cell_meta.columns or 'culture' not in df_cell_meta.columns:
+            raise ValueError("df_cell_meta must contain 'depmap_id' and 'culture' when culture_filter is used.")
+        valid_ids = df_cell_meta[df_cell_meta['culture'].isin(culture_vals)]['depmap_id'].astype(str).unique().tolist()
+        long = long[long['ModelID'].astype(str).isin(valid_ids)].copy()
+
+    long['ModelID'] = long['ModelID'].astype(str)
+    long['inhibitor'] = long['inhibitor'].astype(str)
+    return long
+
+
+def _get_expression_vector(df_expr, gene):
+    """Return a standardized expression vector table: ModelID, expression."""
+    expr_cols = list(df_expr.columns)
+
+    id_col = None
+    for c in ('ModelID', 'Depmap Id', 'Unnamed: 0'):
+        if c in expr_cols:
+            id_col = c
+            break
+    if id_col is None:
+        raise ValueError("No ID column found in expression dataframe. Expected one of: ModelID, Depmap Id, Unnamed: 0")
+
+    gene_match = [c for c in expr_cols if str(c).split(' (')[0].upper() == gene.upper()]
+    if len(gene_match) == 0:
+        raise ValueError(f"Gene '{gene}' was not found in expression dataframe columns.")
+
+    gene_col = gene_match[0]
+
+    expr_vec = df_expr[[id_col, gene_col]].copy()
+    expr_vec = expr_vec.rename(columns={id_col: 'ModelID', gene_col: 'expression'})
+    expr_vec['ModelID'] = expr_vec['ModelID'].astype(str)
+    expr_vec['expression'] = pd.to_numeric(expr_vec['expression'], errors='coerce')
+    return expr_vec.dropna(subset=['ModelID', 'expression'])
+
+
+def ScanExpressionDrugSensitivity(
+    gene,
+    df_expr,
+    df_drug,
+    subset_col=None,
+    subset_values=None,
+    min_n=25,
+    corr_method: Literal['pearson', 'spearman', 'both']='both',
+    split_high_low=True,
+):
+    """
+    Scan all drugs for association between one gene's expression and drug response.
+
+    Notes:
+    - Uses AUC where lower means higher sensitivity.
+    - Also reports sens_score = -AUC so positive correlation implies sensitization.
+    """
+    expr_vec = _get_expression_vector(df_expr, gene)
+    drug_long = BuildDrugLong(df_drug)
+
+    df = pd.merge(drug_long, expr_vec, on='ModelID', how='inner')
+
+    if subset_col is not None and subset_values is not None:
+        if isinstance(subset_values, str):
+            subset_values = [subset_values]
+        allowed = df_cl[df_cl[subset_col].isin(subset_values)]['ModelID'].astype(str).tolist()
+        df = df[df['ModelID'].isin(allowed)].copy()
+
+    df['sens_score'] = -df['auc']
+
+    def corr_with_p(x, y, method):
+        pair = pd.DataFrame({'x': x, 'y': y}).dropna()
+        if len(pair) < 3:
+            return np.nan, np.nan
+
+        # Avoid scipy ConstantInputWarning for zero-variance vectors.
+        if pair['x'].nunique() <= 1 or pair['y'].nunique() <= 1:
+            return np.nan, np.nan
+
+        if method == 'pearson':
+            r, p = pearsonr(pair['x'], pair['y'])
+        else:
+            r, p = spearmanr(pair['x'], pair['y'])
+        return float(r), float(p)
+
+    results = []
+    for inhibitor, g in df.groupby('inhibitor', dropna=True):
+        g2 = g.dropna(subset=['expression', 'auc']).copy()
+        n = int(g2.shape[0])
+        if n < min_n:
+            continue
+
+        row = {'gene': gene, 'inhibitor': inhibitor, 'n': n}
+
+        if corr_method in ('pearson', 'both'):
+            r_auc, p_auc = corr_with_p(g2['expression'], g2['auc'], 'pearson')
+            r_sens, p_sens = corr_with_p(g2['expression'], g2['sens_score'], 'pearson')
+            row['r_pearson_expr_auc'] = r_auc
+            row['p_pearson_expr_auc'] = p_auc
+            row['r_pearson_expr_sens'] = r_sens
+            row['p_pearson_expr_sens'] = p_sens
+
+        if corr_method in ('spearman', 'both'):
+            r_auc, p_auc = corr_with_p(g2['expression'], g2['auc'], 'spearman')
+            r_sens, p_sens = corr_with_p(g2['expression'], g2['sens_score'], 'spearman')
+            row['r_spearman_expr_auc'] = r_auc
+            row['p_spearman_expr_auc'] = p_auc
+            row['r_spearman_expr_sens'] = r_sens
+            row['p_spearman_expr_sens'] = p_sens
+
+        if split_high_low:
+            med = float(g2['expression'].median())
+            hi = g2[g2['expression'] >= med]['auc']
+            lo = g2[g2['expression'] < med]['auc']
+            row['delta_mean_auc_hi_minus_lo'] = float(hi.mean() - lo.mean())
+            if len(hi) >= 2 and len(lo) >= 2:
+                row['p_mannwhitney_hi_vs_lo_auc'] = float(mannwhitneyu(hi, lo, alternative='two-sided').pvalue)
+            else:
+                row['p_mannwhitney_hi_vs_lo_auc'] = np.nan
+
+        results.append(row)
+
+    res = pd.DataFrame(results)
+    if res.empty:
+        return res
+
+    for p_col in ('p_spearman_expr_sens', 'p_pearson_expr_sens', 'p_mannwhitney_hi_vs_lo_auc'):
+        if p_col in res.columns:
+            res[f'fdr_{p_col}'] = _bh_fdr(res[p_col])
+
+    strength_metric_col = None
+    strength_p_col = None
+    strength_fdr_col = None
+
+    if 'r_spearman_expr_sens' in res.columns:
+        res['strength'] = res['r_spearman_expr_sens'].astype(float)
+        strength_metric_col = 'r_spearman_expr_sens'
+        strength_p_col = 'p_spearman_expr_sens'
+        strength_fdr_col = 'fdr_p_spearman_expr_sens'
+    elif 'r_pearson_expr_sens' in res.columns:
+        res['strength'] = res['r_pearson_expr_sens'].astype(float)
+        strength_metric_col = 'r_pearson_expr_sens'
+        strength_p_col = 'p_pearson_expr_sens'
+        strength_fdr_col = 'fdr_p_pearson_expr_sens'
+    elif 'r_spearman_expr_auc' in res.columns:
+        res['strength'] = -res['r_spearman_expr_auc'].astype(float)
+        strength_metric_col = 'r_spearman_expr_auc'
+        strength_p_col = 'p_spearman_expr_auc'
+    else:
+        res['strength'] = -res['r_pearson_expr_auc'].astype(float)
+        strength_metric_col = 'r_pearson_expr_auc'
+        strength_p_col = 'p_pearson_expr_auc'
+
+    res['strength_metric_col'] = strength_metric_col
+    if strength_metric_col is not None and strength_metric_col in res.columns:
+        res['strength_metric_value'] = pd.to_numeric(res[strength_metric_col], errors='coerce')
+    else:
+        res['strength_metric_value'] = np.nan
+
+    if strength_p_col is not None and strength_p_col in res.columns:
+        res['strength_p'] = pd.to_numeric(res[strength_p_col], errors='coerce')
+    else:
+        res['strength_p'] = np.nan
+
+    if strength_fdr_col is not None and strength_fdr_col in res.columns:
+        res['strength_fdr'] = pd.to_numeric(res[strength_fdr_col], errors='coerce')
+    else:
+        res['strength_fdr'] = np.nan
+
+    return res.sort_values(['strength', 'n'], ascending=[False, False]).reset_index(drop=True)
+
+
+def PlotExpressionVsDrug(
+    gene,
+    inhibitor,
+    df_expr,
+    df_drug,
+    subset_col=None,
+    subset_values=None,
+    show_regression=True,
+    label_n=True,
+    fig_width=6,
+    fig_height=5,
+):
+    """Scatter plot: expression of one gene versus drug AUC for one inhibitor."""
+    expr_vec = _get_expression_vector(df_expr, gene)
+    drug_long = BuildDrugLong(df_drug)
+    df = pd.merge(drug_long, expr_vec, on='ModelID', how='inner')
+
+    if subset_col is not None and subset_values is not None:
+        if isinstance(subset_values, str):
+            subset_values = [subset_values]
+        allowed = df_cl[df_cl[subset_col].isin(subset_values)]['ModelID'].astype(str).tolist()
+        df = df[df['ModelID'].isin(allowed)].copy()
+
+    df = df[df['inhibitor'] == inhibitor].dropna(subset=['expression', 'auc']).copy()
+    if df.empty:
+        raise ValueError(f"No overlapping data for inhibitor '{inhibitor}' after filtering.")
+
+    x = df['expression'].values
+    y = df['auc'].values
+
+    plt.figure(figsize=(fig_width, fig_height), dpi=200)
+    plt.scatter(x, y, alpha=0.6)
+
+    title = f"{gene} expression vs {inhibitor} AUC"
+    if subset_col is not None and subset_values is not None:
+        if isinstance(subset_values, str):
+            subset_label = subset_values
+        else:
+            subset_label = ', '.join([str(v) for v in subset_values])
+        title += f"\nsubset: {subset_col} = {subset_label}"
+
+    if show_regression and len(df) >= 3:
+        if pd.Series(x).nunique() > 1 and pd.Series(y).nunique() > 1:
+            slope, intercept = np.polyfit(x, y, 1)
+            xfit = np.linspace(x.min(), x.max(), 100)
+            yfit = slope * xfit + intercept
+            plt.plot(xfit, yfit, color='black')
+            r, p = pearsonr(x, y)
+            title += f" | R={r:.2f}, p={p:.2e}"
+        else:
+            title += " | R=NA (constant input)"
+
+    if label_n:
+        title += f" (n={len(df)})"
+
+    plt.xlabel(f"{gene} expression")
+    plt.ylabel('AUC (lower = more sensitive)')
+    plt.title(title)
+    plt.tight_layout()
+    plt.show()
+
+
+def RunExpressionDrugSensitivityScan(
+    gene_of_interest,
+    subset_col='DepmapModelType',
+    subset_values=None,
+    min_n=15,
+    corr_method='both',
+    split_high_low=True,
+    prism_culture_filter=None,
+    plot_single_inhibitor=False,
+    inhibitor_for_plot='Venetoclax',
+):
+    """Load expression + PRISM data and run expression-vs-sensitivity scan."""
+    global df_expr_s10, df_drug_s10, df_prism_cell_meta_s10, df_drug_s10_source
+
+    if df_expr_s10 is not None and df_drug_s10 is not None:
+        print('Using preloaded Section 2 data for expression and drug response.')
+        df_expr = df_expr_s10
+        df_drug = df_drug_s10.copy()
+
+        if prism_culture_filter is not None and df_drug_s10_source == 'prism24q2_matrix':
+            if df_prism_cell_meta_s10 is None:
+                raise FileNotFoundError(
+                    'prism_culture_filter was requested, but Repurposing_Public_24Q2_Cell_Line_Meta_Data.csv was not loaded in Section 2.'
+                )
+            culture_vals = [prism_culture_filter] if isinstance(prism_culture_filter, str) else list(prism_culture_filter)
+            if 'depmap_id' not in df_prism_cell_meta_s10.columns or 'culture' not in df_prism_cell_meta_s10.columns:
+                raise ValueError("PRISM cell metadata must contain 'depmap_id' and 'culture'.")
+            valid_ids = df_prism_cell_meta_s10[df_prism_cell_meta_s10['culture'].isin(culture_vals)]['depmap_id'].astype(str).unique().tolist()
+            df_drug = df_drug[df_drug['ModelID'].astype(str).isin(valid_ids)].copy()
+
+    else:
+        print('Section 2 preloaded data not available. Falling back to on-demand loading.')
+
+        expression_file_candidates = [
+            os.path.join(in_dir, 'OmicsExpressionTPMLogp1HumanProteinCodingGenes26Q1.csv'),
+            os.path.join(in_dir, 'OmicsExpressionTPMLogp1HumanProteinCodingGenes.csv'),
+        ]
+
+        drug_file_candidates = [
+            os.path.join(in_dir, 'PRISMRepurposingPrimaryScreenDoseResponse.csv'),
+            os.path.join(in_dir, 'PRISMRepurposingSecondaryScreenDoseResponse.csv'),
+        ]
+
+        prism_24q2_matrix_candidates = [
+            os.path.join(in_dir, 'Repurposing_Public_24Q2_Extended_Primary_Data_Matrix.csv'),
+        ]
+
+        prism_24q2_compound_candidates = [
+            os.path.join(in_dir, 'Repurposing_Public_24Q2_Extended_Primary_Compound_List.csv'),
+        ]
+
+        prism_24q2_cell_meta_candidates = [
+            os.path.join(in_dir, 'Repurposing_Public_24Q2_Cell_Line_Meta_Data.csv'),
+        ]
+
+        in_expr = next((f for f in expression_file_candidates if os.path.exists(f)), None)
+        in_drug = next((f for f in drug_file_candidates if os.path.exists(f)), None)
+        in_prism_matrix = next((f for f in prism_24q2_matrix_candidates if os.path.exists(f)), None)
+        in_prism_compounds = next((f for f in prism_24q2_compound_candidates if os.path.exists(f)), None)
+        in_prism_cell_meta = next((f for f in prism_24q2_cell_meta_candidates if os.path.exists(f)), None)
+
+        if in_expr is None:
+            raise FileNotFoundError(f'No expression file found. Tried: {expression_file_candidates}')
+        if in_prism_matrix is None and in_drug is None:
+            raise FileNotFoundError(
+                f'No drug response file found. Tried 24Q2 matrix: {prism_24q2_matrix_candidates} and long-format files: {drug_file_candidates}'
+            )
+        if in_prism_matrix is not None and in_prism_compounds is None:
+            raise FileNotFoundError(f'Found 24Q2 matrix but no 24Q2 compound list. Tried: {prism_24q2_compound_candidates}')
+
+        print(f'Loading expression file: {in_expr}')
+        df_expr = pd.read_csv(in_expr, low_memory=False)
+
+        if in_prism_matrix is not None:
+            print(f'Loading PRISM 24Q2 matrix: {in_prism_matrix}')
+            print(f'Loading PRISM 24Q2 compounds: {in_prism_compounds}')
+            df_matrix = pd.read_csv(in_prism_matrix, low_memory=False)
+            df_compounds = pd.read_csv(in_prism_compounds, low_memory=False)
+            df_cell_meta = pd.read_csv(in_prism_cell_meta, low_memory=False) if in_prism_cell_meta is not None else None
+            df_drug = BuildDrugLongFromExtendedPrimary(
+                df_matrix=df_matrix,
+                df_compounds=df_compounds,
+                df_cell_meta=df_cell_meta,
+                culture_filter=prism_culture_filter,
+            )
+            print('Using LFC from PRISM 24Q2 matrix as response metric (stored in auc column for compatibility).')
+        else:
+            print(f'Loading long-format drug file: {in_drug}')
+            df_drug = pd.read_csv(in_drug, low_memory=False)
+
+    df_drug_scan = ScanExpressionDrugSensitivity(
+        gene=gene_of_interest,
+        df_expr=df_expr,
+        df_drug=df_drug,
+        subset_col=subset_col,
+        subset_values=subset_values,
+        min_n=min_n,
+        corr_method=corr_method,
+        split_high_low=split_high_low,
+    )
+
+    out_scan_file = os.path.join(out, f'{gene_of_interest}_expression_vs_drug_sensitivity_scan.csv')
+    df_drug_scan.to_csv(out_scan_file, index=False)
+    print(f'Wrote scan results to: {out_scan_file}')
+    top5_cols = [
+        c for c in [
+            'inhibitor',
+            'n',
+            'strength',
+            'strength_metric_col',
+            'strength_metric_value',
+            'strength_p',
+            'strength_fdr',
+        ]
+        if c in df_drug_scan.columns
+    ]
+    print('Top 5 inhibitors (ranked by strength):')
+    print(df_drug_scan[top5_cols].head(5).to_string(index=False))
+
+    if not df_drug_scan.empty:
+        top_inhibitor = str(df_drug_scan.iloc[0]['inhibitor'])
+        print(f"Auto-plotting #1 hit: {top_inhibitor}")
+        PlotExpressionVsDrug(
+            gene=gene_of_interest,
+            inhibitor=top_inhibitor,
+            df_expr=df_expr,
+            df_drug=df_drug,
+            subset_col=subset_col,
+            subset_values=subset_values,
+            show_regression=True,
+            label_n=True,
+        )
+    else:
+        print('No hits passed filters, so no top-hit plot was generated.')
+
+    if plot_single_inhibitor:
+        PlotExpressionVsDrug(
+            gene=gene_of_interest,
+            inhibitor=inhibitor_for_plot,
+            df_expr=df_expr,
+            df_drug=df_drug,
+            subset_col=subset_col,
+            subset_values=subset_values,
+            show_regression=True,
+            label_n=True,
+        )
+
+    return df_drug_scan
+
+
+def _resolve_inhibitor_name(df_drug, inhibitor_query):
+    """Resolve an inhibitor name robustly (exact -> case-insensitive -> contains)."""
+    available = pd.Series(df_drug['inhibitor'].astype(str).unique())
+
+    exact = available[available == inhibitor_query]
+    if len(exact) > 0:
+        return exact.iloc[0]
+
+    exact_ci = available[available.str.lower() == str(inhibitor_query).lower()]
+    if len(exact_ci) > 0:
+        return exact_ci.iloc[0]
+
+    contains = available[available.str.lower().str.contains(str(inhibitor_query).lower(), regex=False)]
+    if len(contains) > 0:
+        print(f"Inhibitor '{inhibitor_query}' not found exactly. Using closest match: {contains.iloc[0]}")
+        if len(contains) > 1:
+            print('Other matches:', ', '.join(contains.head(10).tolist()))
+        return contains.iloc[0]
+
+    raise ValueError(f"Inhibitor '{inhibitor_query}' not found in drug table.")
+
+
+def ScanGenesForInhibitor(
+    inhibitor,
+    df_expr,
+    df_drug,
+    subset_col=None,
+    subset_values=None,
+    min_n=15,
+    corr_method: Literal['pearson', 'spearman', 'both'] = 'both',
+):
+    """
+    Scan all genes for association with one inhibitor response.
+
+    Notes:
+    - Uses AUC where lower means higher sensitivity.
+    - Also reports sens_score = -AUC so positive correlation implies sensitization.
+    """
+    drug_long = BuildDrugLong(df_drug)
+    inhibitor_resolved = _resolve_inhibitor_name(drug_long, inhibitor)
+    drug_one = drug_long[drug_long['inhibitor'] == inhibitor_resolved].copy()
+
+    if subset_col is not None and subset_values is not None:
+        if isinstance(subset_values, str):
+            subset_values = [subset_values]
+        allowed = df_cl[df_cl[subset_col].isin(subset_values)]['ModelID'].astype(str).tolist()
+        drug_one = drug_one[drug_one['ModelID'].isin(allowed)].copy()
+
+    if drug_one.empty:
+        raise ValueError(f"No rows left for inhibitor '{inhibitor_resolved}' after subset filtering.")
+
+    # Prepare expression matrix with standardized ModelID.
+    expr_cols = list(df_expr.columns)
+    id_col = None
+    for c in ('ModelID', 'Depmap Id', 'Unnamed: 0'):
+        if c in expr_cols:
+            id_col = c
+            break
+    if id_col is None:
+        raise ValueError("No ID column found in expression dataframe. Expected one of: ModelID, Depmap Id, Unnamed: 0")
+
+    gene_cols = [c for c in df_expr.columns if c != id_col]
+    expr_mat = df_expr[[id_col] + gene_cols].copy().rename(columns={id_col: 'ModelID'})
+    expr_mat['ModelID'] = expr_mat['ModelID'].astype(str)
+
+    merged = pd.merge(drug_one[['ModelID', 'auc']], expr_mat, on='ModelID', how='inner')
+    merged['sens_score'] = -pd.to_numeric(merged['auc'], errors='coerce')
+
+    def corr_with_p(x, y, method):
+        pair = pd.DataFrame({'x': x, 'y': y}).dropna()
+        if len(pair) < 3:
+            return np.nan, np.nan, 0
+
+        # Avoid scipy ConstantInputWarning for zero-variance vectors.
+        if pair['x'].nunique() <= 1 or pair['y'].nunique() <= 1:
+            return np.nan, np.nan, len(pair)
+
+        if method == 'pearson':
+            r, p = pearsonr(pair['x'], pair['y'])
+        else:
+            r, p = spearmanr(pair['x'], pair['y'])
+        return float(r), float(p), len(pair)
+
+    results = []
+    for col in gene_cols:
+        gene_label = str(col).split(' (')[0]
+        x = pd.to_numeric(merged[col], errors='coerce')
+        y_auc = pd.to_numeric(merged['auc'], errors='coerce')
+        y_sens = pd.to_numeric(merged['sens_score'], errors='coerce')
+
+        row = {'inhibitor': inhibitor_resolved, 'gene': gene_label}
+        n = int(pd.DataFrame({'x': x, 'y': y_auc}).dropna().shape[0])
+        row['n'] = n
+        if n < min_n:
+            continue
+
+        if corr_method in ('pearson', 'both'):
+            r_auc, p_auc, _ = corr_with_p(x, y_auc, 'pearson')
+            r_sens, p_sens, _ = corr_with_p(x, y_sens, 'pearson')
+            row['r_pearson_expr_auc'] = r_auc
+            row['p_pearson_expr_auc'] = p_auc
+            row['r_pearson_expr_sens'] = r_sens
+            row['p_pearson_expr_sens'] = p_sens
+
+        if corr_method in ('spearman', 'both'):
+            r_auc, p_auc, _ = corr_with_p(x, y_auc, 'spearman')
+            r_sens, p_sens, _ = corr_with_p(x, y_sens, 'spearman')
+            row['r_spearman_expr_auc'] = r_auc
+            row['p_spearman_expr_auc'] = p_auc
+            row['r_spearman_expr_sens'] = r_sens
+            row['p_spearman_expr_sens'] = p_sens
+
+        results.append(row)
+
+    res = pd.DataFrame(results)
+    if res.empty:
+        return res
+
+    for p_col in ('p_spearman_expr_sens', 'p_pearson_expr_sens'):
+        if p_col in res.columns:
+            res[f'fdr_{p_col}'] = _bh_fdr(res[p_col])
+
+    strength_metric_col = None
+    strength_p_col = None
+    strength_fdr_col = None
+    if 'r_spearman_expr_sens' in res.columns:
+        res['strength'] = res['r_spearman_expr_sens'].astype(float)
+        strength_metric_col = 'r_spearman_expr_sens'
+        strength_p_col = 'p_spearman_expr_sens'
+        strength_fdr_col = 'fdr_p_spearman_expr_sens'
+    elif 'r_pearson_expr_sens' in res.columns:
+        res['strength'] = res['r_pearson_expr_sens'].astype(float)
+        strength_metric_col = 'r_pearson_expr_sens'
+        strength_p_col = 'p_pearson_expr_sens'
+        strength_fdr_col = 'fdr_p_pearson_expr_sens'
+    elif 'r_spearman_expr_auc' in res.columns:
+        res['strength'] = -res['r_spearman_expr_auc'].astype(float)
+        strength_metric_col = 'r_spearman_expr_auc'
+        strength_p_col = 'p_spearman_expr_auc'
+    else:
+        res['strength'] = -res['r_pearson_expr_auc'].astype(float)
+        strength_metric_col = 'r_pearson_expr_auc'
+        strength_p_col = 'p_pearson_expr_auc'
+
+    res['strength_metric_col'] = strength_metric_col
+    res['strength_metric_value'] = pd.to_numeric(res[strength_metric_col], errors='coerce') if strength_metric_col in res.columns else np.nan
+    res['strength_p'] = pd.to_numeric(res[strength_p_col], errors='coerce') if (strength_p_col is not None and strength_p_col in res.columns) else np.nan
+    res['strength_fdr'] = pd.to_numeric(res[strength_fdr_col], errors='coerce') if (strength_fdr_col is not None and strength_fdr_col in res.columns) else np.nan
+
+    return res.sort_values(['strength', 'n'], ascending=[False, False]).reset_index(drop=True)
+
+
+def RunInhibitorGeneCorrelationScan(
+    inhibitor,
+    subset_col='DepmapModelType',
+    subset_values=None,
+    min_n=15,
+    corr_method='both',
+    plot_top_gene=True,
+):
+    """Run inhibitor->gene scan using preloaded Section 2 data when available."""
+    global df_expr_s10, df_drug_s10
+
+    if df_expr_s10 is not None and df_drug_s10 is not None:
+        print('Using preloaded Section 2 data for inhibitor->gene scan.')
+        df_expr = df_expr_s10
+        df_drug = df_drug_s10
+    else:
+        raise RuntimeError('Section 2 preloaded data not available. Run Section 2 first.')
+
+    df_gene_scan = ScanGenesForInhibitor(
+        inhibitor=inhibitor,
+        df_expr=df_expr,
+        df_drug=df_drug,
+        subset_col=subset_col,
+        subset_values=subset_values,
+        min_n=min_n,
+        corr_method=corr_method,
+    )
+
+    subset_suffix = 'all' if subset_values is None else '_'.join([str(v).replace(' ', '_') for v in (subset_values if isinstance(subset_values, list) else [subset_values])])
+    out_file = os.path.join(out, f"{str(inhibitor).replace(' ', '_')}_gene_correlations_{subset_suffix}.csv")
+    df_gene_scan.to_csv(out_file, index=False)
+    print(f'Wrote gene correlation scan to: {out_file}')
+
+    top_cols = [c for c in ['gene', 'n', 'strength', 'strength_metric_col', 'strength_metric_value', 'strength_p', 'strength_fdr'] if c in df_gene_scan.columns]
+    print(f'Top 5 genes for inhibitor {inhibitor}:')
+    print(df_gene_scan[top_cols].head(5).to_string(index=False))
+
+    if plot_top_gene:
+        if not df_gene_scan.empty:
+            top_gene = str(df_gene_scan.iloc[0]['gene'])
+            top_inhibitor = str(df_gene_scan.iloc[0]['inhibitor'])
+            print(f"Auto-plotting top gene for {top_inhibitor}: {top_gene}")
+            PlotExpressionVsDrug(
+                gene=top_gene,
+                inhibitor=top_inhibitor,
+                df_expr=df_expr,
+                df_drug=df_drug,
+                subset_col=subset_col,
+                subset_values=subset_values,
+                show_regression=True,
+                label_n=True,
+            )
+        else:
+            print(f'No genes passed filters for {inhibitor}; no top-gene plot generated.')
+
+    return df_gene_scan
+
 #%% ===========================================================================
 # 4 Waterfall plot showing dependencies of input genes
 # =============================================================================
@@ -469,7 +1220,7 @@ Graph_n_write('SG', 'DepmapModelType', 'TALL')
 
 import seaborn as sns
 
-gene = 'TRMT12'
+gene = 'KIF11'
 highlighted_cancer_types = ['TALL', 'BALL', 'AML']
 df_cl_col='DepmapModelType' # E.g. OncotreeSubtype, OncotreeLineage, OncotreePrimaryDisease, DepmapModelType
 fig_width=12
@@ -504,13 +1255,40 @@ for gene in genes:
 # =============================================================================
 
 
-gene_set    = ['TRMT12', 'NF1']
+gene_set    = [
+    "TOMM20",   # TOM20
+    "BCL2",     # BCL-2
+    "MCL1",     # MCL-1
+    "BCL2L1",   # BCL-XL
+    "PMAIP1",   # NOXA
+    "BBC3",     # PUMA
+    "FIS1",
+    "OPA1",
+    "DNM1L",    # DRP1
+    "PINK1",
+    "PRKN",     # PARKIN
+    "HERPUD1",
+    "DDIT4",
+    "STARD4",
+    "ALAS1",
+    "TOB2",
+    "NFE2L1",
+    "CAVIN1",
+    "GPX4",
+    "ATF4",
+]
+
+#Ksenia up
+# gene_set = ["B4GALT5", "FANCB", "SARAF", "R3HCC1L", "TMCC3", "TOB2", "ZNF845", "SREBF1", "HERPUD1", "EPN3", "MAPK4", "ZNF721", "ZNG1F;ZNG1C;ZNG1E", "GMPR", "UQCRH", "CNBP", "FAM110C", "EFCAB7", "UBE2W", "GPNMB", "DDIT4", "MCF2L2", "ZSCAN22", 'COX7A2L', 'NME4', 'DNAJB8']
+#Ksenia dn
+gene_set = ["TCEA2", "GPSM3", "RINL", "QPCTL", "RAB5IF", "MRPL35", "ELF4", "RDH10", "IFIT3", "PPP1R13B", "HPX", "MLXIP", "NTAQ1", "G6PC3"]
+
 df_cl_col   = 'DepmapModelType'
 cancers     = ['TALL', 'BALL', 'AML']
 cancers     = 'All'
 min_samples = 6
 fig_width   = 30
-fig_height  = 3
+fig_height  = 5
 annot_vals  = False
 title       ='Cancer dependency (DepMap)'
 
@@ -525,7 +1303,7 @@ HeatmapSpecificGenes(gene_set=gene_set, df_cl_col=df_cl_col, cancers=cancers, mi
 # DepMap dependency plot config
 # -----------------------------
 
-gene                = 'TRMT12'
+gene                = 'KIF11'
 
 # How to subset cancers
 model_type          = 'TALL'            # e.g. "TALL", "AML", None
@@ -549,3 +1327,58 @@ draw_zero_line      = True
 title               = None
 
 df_dep_plot = Scatter_CellLines(df_dm=df_dm, df_cl=df_cl, gene=gene, model_type=model_type, oncotree_subtype=oncotree_subtype, oncotree_lineage=oncotree_lineage, query=query, sort_ascending=sort_ascending, highlight=highlight_lines, label=label_mode, top_n_labels=top_n_labels, figsize=(fig_width, fig_height), dpi=dpi, point_size=point_size, yline0=draw_zero_line, title=title,)
+
+
+#%% =============================================================================
+# 10 Expression vs drug sensitivity scan (DepMap/CCLE)
+# =============================================================================
+
+gene_of_interest = 'BCL2'
+subset_col       = 'DepmapModelType'   # e.g. 'DepmapModelType', 'OncotreeLineage', 'OncotreeSubtype'
+subset_values    = None            # list or set to None to include all models
+min_n            = 15
+corr_method      = 'both'              # 'pearson', 'spearman', or 'both'
+split_high_low   = True
+
+# Optional: specified inhibitor scatter plot
+plot_single_inhibitor = True
+inhibitor_for_plot    = 'Venetoclax'
+
+# Optional PRISM culture filter for 24Q2 data: None, 'PR500A', 'PR500B', or ['PR500A','PR500B']
+prism_culture_filter = None
+df_drug_scan = RunExpressionDrugSensitivityScan(
+    gene_of_interest=gene_of_interest,
+    subset_col=subset_col,
+    subset_values=subset_values,
+    min_n=min_n,
+    corr_method=corr_method,
+    split_high_low=split_high_low,
+    prism_culture_filter=prism_culture_filter,
+    plot_single_inhibitor=plot_single_inhibitor,
+    inhibitor_for_plot=inhibitor_for_plot,
+)
+
+
+#%% =============================================================================
+# 11 Genes correlated with selected inhibitors
+# =============================================================================
+
+subset_col_inhibitor_scan    = 'DepmapModelType'
+subset_values_inhibitor_scan = ['AML']
+min_n_inhibitor_scan         = 2
+corr_method_inhibitor_scan   = 'both'
+
+inhibitor_list = ['PIBRENTASVIR']
+
+gene_scans_by_inhibitor = {}
+for inhibitor_name in inhibitor_list:
+    print(f'Running {inhibitor_name}')
+    gene_scans_by_inhibitor[inhibitor_name] = RunInhibitorGeneCorrelationScan(
+        inhibitor=inhibitor_name,
+        subset_col=subset_col_inhibitor_scan,
+        subset_values=subset_values_inhibitor_scan,
+        min_n=min_n_inhibitor_scan,
+        corr_method=corr_method_inhibitor_scan,
+        plot_top_gene=True,
+    )
+
